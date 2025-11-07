@@ -1,0 +1,64 @@
+# Docker ignore file - exclude unnecessary files from Docker image
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# Documentation (keep essentials only)
+*.md
+!README.md
+!USER_MANAGEMENT_GUIDE.md
+
+# Logs (will be created fresh)
+logs/
+*.log
+
+# Data (will be mounted as volume)
+data/*.duckdb
+data/*.db
+!data/.gitkeep
+
+# Results (will be mounted as volume)
+fe_results/
+
+# Development files
+demo_*.py
+check_*.py
+fix_*.py
+analyze_*.py
+audit_*.py
+test_*.py
+interactive_*.py
+run_*.py
+
+# Conda environment
+.conda/

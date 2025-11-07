@@ -1,0 +1,182 @@
+{
+  "audit_time": "2025-11-07T11:39:36.909335",
+  "company_ticker": "NVDA",
+  "statistics": {
+    "total_files": 12,
+    "files_with_critical": 0,
+    "files_with_errors": 3,
+    "files_with_warnings": 7,
+    "total_critical": 0,
+    "total_errors": 3,
+    "total_warnings": 26,
+    "passed": false
+  },
+  "issues": {
+    "nvda_Comprehensive_Model_20251107_1100.xlsx": [
+      {
+        "severity": "WARNING",
+        "location": "Sheet: Summary",
+        "message": "Sheet is 64.6% empty - check data completeness"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: Assumptions",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: QoE",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: Drivers",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: 3FS_Model",
+        "message": "Sheet is 73.3% empty - check data completeness"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: 3FS_Model",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: DCF",
+        "message": "Sheet is 65.0% empty - check data completeness"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: DCF",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: CCA_Precedent",
+        "message": "Sheet is 54.7% empty - check data completeness"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: CCA_Precedent",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: Accretion_Dilution",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: PPA",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: Synergies",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: LBO",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: Historical_Data",
+        "message": "No NVDA-specific data found - may be generic template"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Sheet: Audit_Trail",
+        "message": "No NVDA-specific data found - may be generic template"
+      }
+    ],
+    "nvda_Dashboard_20251107_1100.html": [
+      {
+        "severity": "ERROR",
+        "location": "HTML",
+        "message": "Very little visible text content"
+      }
+    ],
+    "nvda_Data_Lineage_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Commercial_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Financial_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Legal_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Technology_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 2, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 3, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 4, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 5, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_IC_Memo_20251107_1100.docx": [],
+    "nvda_Lineage_Graph_20251107_1100.html": [
+      {
+        "severity": "ERROR",
+        "location": "HTML",
+        "message": "Very little visible text content"
+      }
+    ],
+    "nvda_Peer_Rationale_20251107_1100.docx": [],
+    "nvda_Presentation_20251107_1100.pptx": [],
+    "nvda_TearSheet_20251107_1100.docx": [
+      {
+        "severity": "ERROR",
+        "location": "Document",
+        "message": "Document has very little content (449 characters) - likely incomplete"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 2 mentions of NVDA - check specificity"
+      }
+    ]
+  }
+}

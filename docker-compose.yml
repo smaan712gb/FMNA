@@ -1,0 +1,47 @@
+# FMNA Platform - Docker Compose Configuration
+# One-command deployment for production use
+
+version: '3.8'
+
+services:
+  fmna-app:
+    build: .
+    container_name: fmna-platform
+    ports:
+      - "8501:8501"  # Streamlit web interface
+    environment:
+      - FMP_API_KEY=${FMP_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-deepseek-reasoner}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-32000}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ./data:/app/data  # Persist user database and analysis data
+      - ./fe_results:/app/fe_results  # Persist generated outputs
+      - ./logs:/app/logs  # Persist logs
+    depends_on:
+      - redis
+    restart: unless-stopped
+    networks:
+      - fmna-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: fmna-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - fmna-network
+    command: redis-server --appendonly yes
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  fmna-network:
+    driver: bridge

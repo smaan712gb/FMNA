@@ -1,0 +1,119 @@
+{
+  "audit_time": "2025-11-07T11:57:55.265511",
+  "company_ticker": "NVDA",
+  "statistics": {
+    "total_files": 14,
+    "files_with_critical": 1,
+    "files_with_errors": 5,
+    "files_with_warnings": 6,
+    "total_critical": 1,
+    "total_errors": 5,
+    "total_warnings": 10,
+    "passed": false
+  },
+  "issues": {
+    "comprehensive_audit_report_20251107_1139.json": [
+      {
+        "severity": "ERROR",
+        "message": "Unsupported file type or missing library: .json"
+      }
+    ],
+    "comprehensive_audit_report_20251107_1151.json": [
+      {
+        "severity": "ERROR",
+        "message": "Unsupported file type or missing library: .json"
+      }
+    ],
+    "nvda_Comprehensive_Model_20251107_1100.xlsx": [
+      {
+        "severity": "CRITICAL",
+        "location": "Excel File",
+        "message": "Cannot read Excel file: [Errno 13] Permission denied: 'fe_results\\\\nvda_Comprehensive_Model_20251107_1100.xlsx'"
+      }
+    ],
+    "nvda_Dashboard_20251107_1100.html": [
+      {
+        "severity": "ERROR",
+        "location": "HTML",
+        "message": "Very little visible text content"
+      }
+    ],
+    "nvda_Data_Lineage_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Commercial_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Financial_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Legal_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_DD_Technology_20251107_1100.docx": [
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 2, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 3, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 4, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Table 1, Row 5, Cell 5",
+        "message": "Generic text 'None required': 'None required'"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 1 mentions of NVDA - check specificity"
+      }
+    ],
+    "nvda_IC_Memo_20251107_1100.docx": [],
+    "nvda_Lineage_Graph_20251107_1100.html": [
+      {
+        "severity": "ERROR",
+        "location": "HTML",
+        "message": "Very little visible text content"
+      }
+    ],
+    "nvda_Peer_Rationale_20251107_1100.docx": [],
+    "nvda_Presentation_20251107_1100.pptx": [],
+    "nvda_TearSheet_20251107_1100.docx": [
+      {
+        "severity": "ERROR",
+        "location": "Document",
+        "message": "Document has very little content (449 characters) - likely incomplete"
+      },
+      {
+        "severity": "WARNING",
+        "location": "Document",
+        "message": "Only 2 mentions of NVDA - check specificity"
+      }
+    ]
+  }
+}

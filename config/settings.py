@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
     
     # API Keys
-    fmp_api_key: str = Field(..., description="Financial Modeling Prep API key")
-    deepseek_api_key: str = Field(..., description="DeepSeek API key")
+    fmp_api_key: str = Field(default="", description="Financial Modeling Prep API key")
+    deepseek_api_key: str = Field(default="", description="DeepSeek API key")
     sec_api_key: Optional[str] = Field(None, description="SEC API key (optional)")
     
     # Database Configuration
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     postgres_port: int = Field(default=5432, description="PostgreSQL port")
     postgres_db: str = Field(default="fmna", description="PostgreSQL database name")
     postgres_user: str = Field(default="fmna_user", description="PostgreSQL username")
-    postgres_password: str = Field(..., description="PostgreSQL password")
+    postgres_password: str = Field(default="demo_password", description="PostgreSQL password")
     
     # Redis Configuration
     redis_host: str = Field(default="localhost", description="Redis host")
@@ -68,8 +68,8 @@ class Settings(BaseSettings):
     prefect_api_url: str = Field(default="http://localhost:4200/api", description="Prefect API URL")
     
     # Security
-    secret_key: str = Field(..., description="Secret key for encryption")
-    jwt_secret: str = Field(..., description="JWT secret for authentication")
+    secret_key: str = Field(default="demo_secret_key_change_in_production", description="Secret key for encryption")
+    jwt_secret: str = Field(default="demo_jwt_secret_change_in_production", description="JWT secret for authentication")
     
     # Frontend
     frontend_url: str = Field(default="http://localhost:3000", description="Frontend URL")

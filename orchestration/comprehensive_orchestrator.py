@@ -11,7 +11,7 @@ from loguru import logger
 
 from agents.ingestion_agent import IngestionAgent
 from agents.modeling_agent import ModelingAgent, ValuationPackage
-from agents.dd_agents import DDAgentsSuite
+from agents.dd_agents_enhanced import EnhancedDDAgentsSuite
 from ingestion.sec_client import SECClient
 from engines import (
     WACCInputs, TerminalValueInputs, PeerMetrics,
@@ -68,7 +68,7 @@ class ComprehensiveOrchestrator:
         # Initialize agents
         self.ingestion = IngestionAgent()
         self.modeling = ModelingAgent()
-        self.dd_suite = DDAgentsSuite()
+        self.dd_suite = EnhancedDDAgentsSuite()  # Use ENHANCED DD agents
         self.sec_client = SECClient(email="fmna@platform.com")  # FREE - no API key
         self.db = DuckDBAdapter()
         self.settings = get_settings()
@@ -868,20 +868,24 @@ class ComprehensiveOrchestrator:
             'customer_concentration': None,  # Would need customer data
         }
         
+        # Extract industry from profile
+        profile = financial_data.get('profile')
+        industry = profile.industry if profile and hasattr(profile, 'industry') else None
+        
         # Log what we're passing to DD agents
-        logger.debug(f"   → Passing {len(dd_financial_data)} financial metrics to DD agents")
+        logger.debug(f"   → Passing {len(dd_financial_data)} financial metrics to ENHANCED DD agents")
         logger.debug(f"   → Revenue data points: {len(dd_financial_data.get('revenue', []))}")
         logger.debug(f"   → DSO data points: {len(dd_financial_data.get('dso', []))}")
+        logger.debug(f"   → Industry: {industry or 'Not specified'}")
         
-        # Run DD suite with comprehensive data
+        # Run ENHANCED DD suite with comprehensive data
         dd_results = await self.dd_suite.run_full_dd(
             symbol=symbol,
             financial_data=dd_financial_data,
-            filing_data=None,  # Would need SEC data for legal/tax DD
+            filing_data=None,  # Would need SEC data
             market_data=dd_market_data,
-            tech_data=None,  # Would need tech assessment data
-            esg_data=None,   # Would need ESG data
-            hr_data=None     # Would need HR data
+            peers_data=financial_data.get('peers_data'),  # Pass peer data if available
+            industry=industry  # Pass industry for ESG analysis
         )
         
         total_risks = sum(len(risks) for risks in dd_results.values())

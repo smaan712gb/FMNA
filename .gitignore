@@ -50,9 +50,16 @@ data/models/*
 !data/processed/.gitkeep
 !data/models/.gitkeep
 
-# Outputs
-outputs/*
-!outputs/.gitkeep
+# Outputs - ignore generated files but keep Python modules
+outputs/*.xlsx
+outputs/*.docx
+outputs/*.pptx
+outputs/*.html
+outputs/*.pdf
+outputs/*.json
+outputs/*.txt
+outputs/.gitkeep
+!outputs/*.py
 
 # Logs
 *.log

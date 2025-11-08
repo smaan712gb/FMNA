@@ -810,31 +810,87 @@ class ComprehensiveOrchestrator:
         """
         logger.info(f"🔍 Running due diligence for {symbol}...")
         
-        # Extract data for DD
+        # Extract comprehensive data for DD - DD AGENTS NEED DETAILED DATA!
         income_statements = financial_data.get('income_statement', [])
         balance_sheets = financial_data.get('balance_sheet', [])
+        cash_flows = financial_data.get('cash_flow', [])
+        key_metrics = financial_data.get('key_metrics', [])
+        ratios = financial_data.get('ratios', [])
+        market_snapshot = financial_data.get('market_snapshot', {})
         
-        # Prepare financial metrics for DD
+        # Prepare COMPREHENSIVE financial metrics for DD agents
+        # They need detailed data to identify meaningful risks
         dd_financial_data = {
+            # Income Statement data (3 years)
             'revenue': [float(stmt.get('revenue', 0)) for stmt in income_statements[:3]],
+            'revenue_growth': [float(stmt.get('revenue', 0)) / float(income_statements[i+1].get('revenue', 1)) - 1 
+                              if i + 1 < len(income_statements) and income_statements[i+1].get('revenue', 0) > 0 
+                              else 0 for i, stmt in enumerate(income_statements[:3])],
+            'gross_profit': [float(stmt.get('grossProfit', 0)) for stmt in income_statements[:3]],
+            'ebitda': [float(stmt.get('ebitda', 0)) for stmt in income_statements[:3]],
+            'ebit': [float(stmt.get('operatingIncome', 0)) for stmt in income_statements[:3]],
             'net_income': [float(stmt.get('netIncome', 0)) for stmt in income_statements[:3]],
+            'operating_expenses': [float(stmt.get('operatingExpenses', 0)) for stmt in income_statements[:3]],
+            
+            # Balance Sheet data (3 years)
             'total_assets': [float(stmt.get('totalAssets', 0)) for stmt in balance_sheets[:3]],
             'total_debt': [float(stmt.get('totalDebt', 0)) for stmt in balance_sheets[:3]],
+            'current_assets': [float(stmt.get('totalCurrentAssets', 0)) for stmt in balance_sheets[:3]],
+            'current_liabilities': [float(stmt.get('totalCurrentLiabilities', 0)) for stmt in balance_sheets[:3]],
+            'accounts_receivable': [float(stmt.get('netReceivables', 0)) for stmt in balance_sheets[:3]],
+            'inventory': [float(stmt.get('inventory', 0)) for stmt in balance_sheets[:3]],
+            'cash': [float(stmt.get('cashAndCashEquivalents', 0)) for stmt in balance_sheets[:3]],
+            'equity': [float(stmt.get('totalStockholdersEquity', 0)) for stmt in balance_sheets[:3]],
+            
+            # Cash Flow data (3 years)
+            'operating_cash_flow': [float(stmt.get('operatingCashFlow', 0)) for stmt in cash_flows[:3]],
+            'free_cash_flow': [float(stmt.get('freeCashFlow', 0)) for stmt in cash_flows[:3]],
+            'capex': [abs(float(stmt.get('capitalExpenditure', 0))) for stmt in cash_flows[:3]],
+            
+            # Key Metrics & Ratios
+            'dso': [float(m.get('daysOfSalesOutstanding', 0)) for m in key_metrics[:3]] if key_metrics else [],
+            'inventory_turnover': [float(r.get('inventoryTurnover', 0)) for r in ratios[:3]] if ratios else [],
+            'current_ratio': [float(r.get('currentRatio', 0)) for r in ratios[:3]] if ratios else [],
+            'debt_to_equity': [float(r.get('debtEquityRatio', 0)) for r in ratios[:3]] if ratios else [],
+            'roe': [float(r.get('returnOnEquity', 0)) for r in ratios[:3]] if ratios else [],
+            'roa': [float(r.get('returnOnAssets', 0)) for r in ratios[:3]] if ratios else [],
+            
+            # Market data
+            'market_cap': market_snapshot.get('market_cap', 0),
+            'price': market_snapshot.get('price', 0),
+            'eps': market_snapshot.get('eps', 0),
         }
         
-        # Run DD suite
+        # Prepare market data for Commercial DD
+        dd_market_data = {
+            'market_cap': market_snapshot.get('market_cap', 0),
+            'market_share_trend': 'stable',  # Would need industry data
+            'customer_concentration': None,  # Would need customer data
+        }
+        
+        # Log what we're passing to DD agents
+        logger.debug(f"   → Passing {len(dd_financial_data)} financial metrics to DD agents")
+        logger.debug(f"   → Revenue data points: {len(dd_financial_data.get('revenue', []))}")
+        logger.debug(f"   → DSO data points: {len(dd_financial_data.get('dso', []))}")
+        
+        # Run DD suite with comprehensive data
         dd_results = await self.dd_suite.run_full_dd(
             symbol=symbol,
             financial_data=dd_financial_data,
-            filing_data=None,  # Would need SEC data
-            market_data=None,
-            tech_data=None,
-            esg_data=None,
-            hr_data=None
+            filing_data=None,  # Would need SEC data for legal/tax DD
+            market_data=dd_market_data,
+            tech_data=None,  # Would need tech assessment data
+            esg_data=None,   # Would need ESG data
+            hr_data=None     # Would need HR data
         )
         
         total_risks = sum(len(risks) for risks in dd_results.values())
-        logger.success(f"   ✓ DD complete: {total_risks} risks identified")
+        logger.success(f"   ✓ DD complete: {total_risks} risks identified across {len(dd_results)} categories")
+        
+        # Log risk breakdown
+        for category, risks in dd_results.items():
+            if risks:
+                logger.info(f"     - {category}: {len(risks)} risks")
         
         return dd_results
     

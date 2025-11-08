@@ -842,16 +842,109 @@ class ComprehensiveOrchestrator:
         self,
         result: ComprehensiveAnalysisResult
     ) -> bool:
-        """Store analysis results in database"""
-        logger.info("💾 Storing analysis results...")
+        """Store COMPLETE analysis results in database (not just valuation)"""
+        logger.info("💾 Storing comprehensive analysis results...")
         
         try:
-            # Store valuation in Cognee
+            from storage.memory_manager import AnalysisMemory
+            
+            # Store valuation in memory (existing)
             await self.modeling.store_valuation_in_memory(result.valuation)
-            logger.success("   ✓ Stored in MemoryManager (DuckDB)")
-            return True
+            logger.success("   ✓ Valuation package stored")
+            
+            # CRITICAL FIX: Also store the FULL analysis result
+            # This includes DD risks, financial data, peer data - everything the AI needs
+            full_results = {
+                'valuation': {
+                    'range': {
+                        'low': result.valuation.valuation_range[0] if result.valuation.valuation_range else None,
+                        'high': result.valuation.valuation_range[1] if result.valuation.valuation_range else None
+                    },
+                    'recommended_value': result.valuation.recommended_value,
+                    'dcf_result': {
+                        'value_per_share': result.valuation.dcf_result.value_per_share if result.valuation.dcf_result else None,
+                        'wacc': result.valuation.dcf_result.wacc if result.valuation.dcf_result else None,
+                        'enterprise_value': result.valuation.dcf_result.enterprise_value if result.valuation.dcf_result else None
+                    } if result.valuation.dcf_result else None,
+                    'cca_result': {
+                        'value_per_share_ebitda': result.valuation.cca_result.value_per_share_ebitda if result.valuation.cca_result else None,
+                        'value_per_share_revenue': result.valuation.cca_result.value_per_share_revenue if result.valuation.cca_result else None,
+                        'peer_count': result.valuation.cca_result.peer_count if result.valuation.cca_result else None
+                    } if result.valuation.cca_result else None,
+                    'lbo_result': {
+                        'equity_irr': result.valuation.lbo_result.equity_irr if result.valuation.lbo_result else None,
+                        'equity_moic': result.valuation.lbo_result.equity_moic if result.valuation.lbo_result else None,
+                        'min_value_per_share': result.valuation.lbo_result.min_value_per_share if result.valuation.lbo_result else None,
+                        'max_value_per_share': result.valuation.lbo_result.max_value_per_share if result.valuation.lbo_result else None
+                    } if result.valuation.lbo_result else None
+                },
+                'due_diligence': {
+                    category: [
+                        {
+                            'severity': risk.severity,
+                            'title': risk.title,
+                            'description': risk.description,
+                            'category': risk.category,
+                            'subcategory': risk.subcategory,
+                            'mitigation': risk.mitigation
+                        }
+                        for risk in risks
+                    ]
+                    for category, risks in result.due_diligence.items()
+                },
+                'financial_data': {
+                    'revenue': result.financial_data.get('income_statement', [{}])[0].get('revenue') if result.financial_data.get('income_statement') else None,
+                    'ebitda': result.financial_data.get('income_statement', [{}])[0].get('ebitda') if result.financial_data.get('income_statement') else None,
+                    'net_income': result.financial_data.get('income_statement', [{}])[0].get('netIncome') if result.financial_data.get('income_statement') else None,
+                    'total_assets': result.financial_data.get('balance_sheet', [{}])[0].get('totalAssets') if result.financial_data.get('balance_sheet') else None,
+                    'total_debt': result.financial_data.get('balance_sheet', [{}])[0].get('totalDebt') if result.financial_data.get('balance_sheet') else None,
+                    'market_cap': result.financial_data.get('market_snapshot', {}).get('market_cap')
+                },
+                'peer_analysis': {
+                    'peer_count': len(result.peers_data),
+                    'peers': [peer['symbol'] for peer in result.peers_data[:10]]
+                },
+                'key_insights': {
+                    'key_drivers': result.valuation.key_drivers,
+                    'risk_factors': result.valuation.risk_factors,
+                    'llm_summary': result.valuation.llm_summary
+                }
+            }
+            
+            # Create comprehensive AnalysisMemory object
+            comprehensive_memory = AnalysisMemory(
+                session_id=f"comprehensive_{result.symbol}_{result.timestamp.strftime('%Y%m%d_%H%M%S')}",
+                ticker=result.symbol,
+                timestamp=result.timestamp,
+                context={
+                    'company_name': result.company_name,
+                    'analysis_type': 'comprehensive_full',
+                    'timestamp': result.timestamp.isoformat(),
+                    'data_sources': result.data_sources_used,
+                    'api_calls': result.total_api_calls
+                },
+                results=full_results,
+                metadata={
+                    'duration_seconds': result.analysis_duration_seconds,
+                    'data_integrity': '100% REAL DATA'
+                }
+            )
+            
+            # Store comprehensive results
+            success = self.modeling.memory.store_analysis(comprehensive_memory)
+            
+            if success:
+                logger.success("   ✓ FULL comprehensive results stored in MemoryManager")
+                logger.success(f"   ✓ AI can now access: valuation, DD risks, financial data, peers")
+            else:
+                logger.warning("   ⚠ Failed to store comprehensive results")
+            
+            return success
+            
         except Exception as e:
-            logger.warning(f"   ⚠ Storage failed: {str(e)}")
+            logger.error(f"   ✗ Storage failed: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def close(self):

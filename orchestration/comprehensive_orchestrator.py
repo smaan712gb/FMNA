@@ -159,25 +159,36 @@ class ComprehensiveOrchestrator:
         logger.success("✓ Step 2 Complete - All valuations calculated")
         logger.info("")
         
-        # STEP 3: DUE DILIGENCE
+        # STEP 3: SEC FILING INGESTION (NEW)
+        logger.info("┏" + "━" * 78 + "┓")
+        logger.info("┃ STEP 3: SEC FILING INGESTION (10-K, 10-Q)")
+        logger.info("┗" + "━" * 78 + "┛")
+        
+        filing_data = await self._ingest_sec_filings(symbol)
+        
+        logger.success("✓ Step 3 Complete - SEC filings retrieved and parsed")
+        logger.info("")
+        
+        # STEP 4: DUE DILIGENCE (ENHANCED WITH FILING DATA)
         dd_results = {}
         if run_full_dd:
             logger.info("┏" + "━" * 78 + "┓")
-            logger.info("┃ STEP 3: DUE DILIGENCE (6 Categories)")
+            logger.info("┃ STEP 4: DUE DILIGENCE (6 Categories with SEC Data)")
             logger.info("┗" + "━" * 78 + "┛")
             
             dd_results = await self._run_due_diligence(
                 symbol=symbol,
                 financial_data=financial_data,
-                market_data=market_data
+                market_data=market_data,
+                filing_data=filing_data  # NOW INCLUDES SEC FILING DATA
             )
             
-            logger.success(f"✓ Step 3 Complete - {sum(len(risks) for risks in dd_results.values())} risks identified")
+            logger.success(f"✓ Step 4 Complete - {sum(len(risks) for risks in dd_results.values())} risks identified")
             logger.info("")
         
-        # STEP 4: SYNTHESIS & STORAGE
+        # STEP 5: SYNTHESIS & STORAGE
         logger.info("┏" + "━" * 78 + "┓")
-        logger.info("┃ STEP 4: SYNTHESIS & STORAGE")
+        logger.info("┃ STEP 5: SYNTHESIS & STORAGE")
         logger.info("┗" + "━" * 78 + "┛")
         
         duration = (datetime.utcnow() - start_time).total_seconds()
@@ -197,9 +208,9 @@ class ComprehensiveOrchestrator:
         )
         
         # Store in database
-        await self._store_results(result)
+        await self._store_results(result, filing_data)
         
-        logger.success("✓ Step 4 Complete - Results stored")
+        logger.success("✓ Step 5 Complete - Results stored")
         logger.info("")
         
         # FINAL SUMMARY
@@ -799,11 +810,66 @@ class ComprehensiveOrchestrator:
         
         return valuation
     
+    async def _ingest_sec_filings(self, symbol: str) -> Dict[str, Any]:
+        """
+        Ingest SEC filings (10-K, 10-Q) with full section extraction
+        
+        Returns SEC filing data with MD&A, Risk Factors, Footnotes
+        """
+        logger.info(f"📄 Fetching SEC filings for {symbol}...")
+        
+        filing_data = {}
+        
+        try:
+            # Get latest 10-K
+            logger.info("   → Fetching 10-K (Annual Report)...")
+            filing_10k = self.sec_client.get_latest_filing(symbol, "10-K")
+            
+            if filing_10k:
+                filing_data['10k'] = {
+                    'full_text': filing_10k.full_text,
+                    'risk_factors': self.sec_client.extract_risk_factors(filing_10k.full_text),
+                    'mda': self.sec_client.extract_section_item_7(filing_10k.full_text),
+                    'market_risk': self.sec_client.extract_section_item_7a(filing_10k.full_text),
+                    'financials': self.sec_client.extract_section_item_8(filing_10k.full_text),
+                    'filing_date': filing_10k.filing_date,
+                    'accession_number': filing_10k.accession_number
+                }
+                self.data_sources.append("SEC EDGAR 10-K")
+                logger.success(f"   ✓ 10-K retrieved (Filed: {filing_10k.filing_date})")
+                logger.success(f"     - Risk Factors: {len(filing_data['10k']['risk_factors'] or '') // 1000}K chars")
+                logger.success(f"     - MD&A: {len(filing_data['10k']['mda'] or '') // 1000}K chars")
+                logger.success(f"     - Footnotes: {len(filing_data['10k']['financials'] or '') // 1000}K chars")
+            else:
+                logger.warning(f"   ⚠ 10-K not available for {symbol}")
+            
+            # Get latest 10-Q (optional)
+            logger.info("   → Fetching 10-Q (Quarterly Report)...")
+            try:
+                filing_10q = self.sec_client.get_latest_filing(symbol, "10-Q")
+                if filing_10q:
+                    filing_data['10q'] = {
+                        'full_text': filing_10q.full_text,
+                        'mda': self.sec_client.extract_section_item_7(filing_10q.full_text),
+                        'filing_date': filing_10q.filing_date
+                    }
+                    self.data_sources.append("SEC EDGAR 10-Q")
+                    logger.success(f"   ✓ 10-Q retrieved (Filed: {filing_10q.filing_date})")
+            except Exception as e:
+                logger.warning(f"   ⚠ 10-Q not available: {e}")
+            
+        except Exception as e:
+            logger.warning(f"   ⚠ SEC filing retrieval failed: {e}")
+            logger.info("   → Continuing with financial data only")
+        
+        return filing_data
+    
     async def _run_due_diligence(
         self,
         symbol: str,
         financial_data: Dict[str, Any],
-        market_data: Dict[str, Any]
+        market_data: Dict[str, Any],
+        filing_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, List[Any]]:
         """
         Run comprehensive due diligence with REAL DATA
@@ -877,14 +943,18 @@ class ComprehensiveOrchestrator:
         logger.debug(f"   → Revenue data points: {len(dd_financial_data.get('revenue', []))}")
         logger.debug(f"   → DSO data points: {len(dd_financial_data.get('dso', []))}")
         logger.debug(f"   → Industry: {industry or 'Not specified'}")
+        logger.debug(f"   → SEC Filing Data: {'✓ Available' if filing_data else '✗ Not available'}")
+        if filing_data:
+            logger.debug(f"     - 10-K: {'✓' if filing_data.get('10k') else '✗'}")
+            logger.debug(f"     - 10-Q: {'✓' if filing_data.get('10q') else '✗'}")
         
-        # Run ENHANCED DD suite with comprehensive data
+        # Run ENHANCED DD suite with COMPREHENSIVE data (financial + SEC filings)
         dd_results = await self.dd_suite.run_full_dd(
             symbol=symbol,
             financial_data=dd_financial_data,
-            filing_data=None,  # Would need SEC data
+            filing_data=filing_data,  # NOW INCLUDES SEC FILING DATA (10-K, 10-Q)
             market_data=dd_market_data,
-            peers_data=financial_data.get('peers_data'),  # Pass peer data if available
+            peers_data=None,  # Would pass if we had peer DD data
             industry=industry  # Pass industry for ESG analysis
         )
         
@@ -900,9 +970,10 @@ class ComprehensiveOrchestrator:
     
     async def _store_results(
         self,
-        result: ComprehensiveAnalysisResult
+        result: ComprehensiveAnalysisResult,
+        filing_data: Optional[Dict[str, Any]] = None
     ) -> bool:
-        """Store COMPLETE analysis results in database (not just valuation)"""
+        """Store COMPLETE analysis results in database including SEC filing excerpts"""
         logger.info("💾 Storing comprehensive analysis results...")
         
         try:
@@ -912,8 +983,8 @@ class ComprehensiveOrchestrator:
             await self.modeling.store_valuation_in_memory(result.valuation)
             logger.success("   ✓ Valuation package stored")
             
-            # CRITICAL FIX: Also store the FULL analysis result
-            # This includes DD risks, financial data, peer data - everything the AI needs
+            # CRITICAL: Store FULL analysis result including SEC filing data
+            # This includes DD risks, financial data, peer data, AND SEC filing excerpts
             full_results = {
                 'valuation': {
                     'range': {
@@ -968,8 +1039,37 @@ class ComprehensiveOrchestrator:
                     'key_drivers': result.valuation.key_drivers,
                     'risk_factors': result.valuation.risk_factors,
                     'llm_summary': result.valuation.llm_summary
-                }
+                },
+                'sec_filing_data': {
+                    '10k_available': filing_data.get('10k') is not None if filing_data else False,
+                    '10k_filing_date': str(filing_data.get('10k', {}).get('filing_date')) if filing_data and filing_data.get('10k') else None,
+                    '10k_risk_factors_length': len(filing_data.get('10k', {}).get('risk_factors', '') or '') if filing_data and filing_data.get('10k') else 0,
+                    '10k_mda_length': len(filing_data.get('10k', {}).get('mda', '') or '') if filing_data and filing_data.get('10k') else 0,
+                    '10q_available': filing_data.get('10q') is not None if filing_data else False,
+                    '10q_filing_date': str(filing_data.get('10q', {}).get('filing_date')) if filing_data and filing_data.get('10q') else None
+                } if filing_data else {}
             }
+            
+            # Store SEC filing excerpts in Cognee for semantic search
+            if filing_data and filing_data.get('10k'):
+                try:
+                    # Store risk factors excerpt
+                    risk_factors = filing_data['10k'].get('risk_factors', '')
+                    if risk_factors and len(risk_factors) > 100:
+                        await self.modeling.memory.cognee.cognify(
+                            f"SEC 10-K Risk Factors for {result.symbol}: {risk_factors[:5000]}"
+                        )
+                    
+                    # Store MD&A excerpt
+                    mda = filing_data['10k'].get('mda', '')
+                    if mda and len(mda) > 100:
+                        await self.modeling.memory.cognee.cognify(
+                            f"SEC 10-K MD&A for {result.symbol}: {mda[:5000]}"
+                        )
+                    
+                    logger.success("   ✓ SEC filing excerpts stored in Cognee knowledge graph")
+                except Exception as e:
+                    logger.warning(f"   ⚠ Cognee storage of filings failed: {e}")
             
             # Create comprehensive AnalysisMemory object
             comprehensive_memory = AnalysisMemory(

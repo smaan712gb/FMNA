@@ -47,6 +47,85 @@ class IngestionAgent:
         
         logger.info("Ingestion Agent initialized")
     
+    def detect_financial_scale(self, financial_data: Dict[str, Any]) -> Tuple[float, str]:
+        """
+        Detect if financial data is in ones, thousands, millions, or billions
+        
+        Returns:
+            (scale_factor, unit_label) where scale_factor converts to dollars
+        """
+        income_stmt = financial_data.get('income_statement', [])[0] if financial_data.get('income_statement') else {}
+        balance_sheet = financial_data.get('balance_sheet', [])[0] if financial_data.get('balance_sheet') else {}
+        market_snapshot = financial_data.get('market_snapshot', {})
+        
+        revenue = float(income_stmt.get('revenue', 0))
+        market_cap = float(market_snapshot.get('market_cap', 0))
+        
+        if revenue == 0 or market_cap == 0:
+            logger.warning("Cannot detect scale - missing revenue or market cap")
+            return 1.0, "unknown"
+        
+        ratio = market_cap / revenue
+        
+        if 0.1 < ratio < 50:
+            return 1.0, "dollars"
+        elif 100 < ratio < 50000:
+            return 1000.0, "thousands"
+        elif 100000 < ratio < 50000000:
+            return 1000000.0, "millions"
+        elif ratio > 50000000:
+            return 1000000000.0, "billions"
+        else:
+            logger.warning(f"Ambiguous scale (ratio={ratio:.2f}), defaulting to millions")
+            return 1000000.0, "millions"
+    
+    def normalize_financial_scale(
+        self,
+        financial_data: Dict[str, Any],
+        target_scale: float = 1.0
+    ) -> Dict[str, Any]:
+        """
+        Normalize all financial values to consistent scale
+        """
+        current_scale, unit_label = self.detect_financial_scale(financial_data)
+        
+        if current_scale == target_scale:
+            logger.info(f"Financial data already in target scale ({unit_label})")
+            return financial_data
+        
+        conversion_factor = current_scale / target_scale
+        logger.info(f"Converting from {unit_label} to dollars (factor: {conversion_factor})")
+        
+        # Normalize all statements
+        for stmt in financial_data.get('income_statement', []):
+            for key in ['revenue', 'costOfRevenue', 'grossProfit', 'operatingExpenses', 
+                       'ebitda', 'operatingIncome', 'interestExpense', 'incomeTaxExpense',
+                       'netIncome', 'eps', 'researchAndDevelopmentExpenses',
+                       'sellingGeneralAndAdministrativeExpenses']:
+                if key in stmt and stmt[key] is not None:
+                    stmt[key] = float(stmt[key]) * conversion_factor
+        
+        for stmt in financial_data.get('balance_sheet', []):
+            for key in ['cashAndCashEquivalents', 'netReceivables', 'inventory',
+                       'totalCurrentAssets', 'propertyPlantEquipmentNet', 'goodwill',
+                       'totalAssets', 'accountPayables', 'totalCurrentLiabilities',
+                       'totalDebt', 'totalLiabilities', 'totalStockholdersEquity']:
+                if key in stmt and stmt[key] is not None:
+                    stmt[key] = float(stmt[key]) * conversion_factor
+        
+        for stmt in financial_data.get('cash_flow', []):
+            for key in ['operatingCashFlow', 'capitalExpenditure', 'freeCashFlow']:
+                if key in stmt and stmt[key] is not None:
+                    stmt[key] = float(stmt[key]) * conversion_factor
+        
+        if 'market_snapshot' in financial_data:
+            for key in ['market_cap']:
+                if key in financial_data['market_snapshot'] and financial_data['market_snapshot'][key] is not None:
+                    financial_data['market_snapshot'][key] = float(financial_data['market_snapshot'][key]) * conversion_factor
+        
+        logger.success("Normalized all financial values to dollars")
+        return financial_data
+    
     def ingest_company_full(
         self,
         symbol: str,

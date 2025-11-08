@@ -199,7 +199,19 @@ class AIValuationEngine:
     ) -> CompanyProfile:
         """Use LLM to intelligently classify company and determine valuation approach"""
         
-        context_str = json.dumps(additional_context, indent=2) if additional_context else "None"
+        # Convert Decimal objects to float for JSON serialization
+        if additional_context:
+            serializable_context = {}
+            for key, value in additional_context.items():
+                if hasattr(value, '__float__'):
+                    serializable_context[key] = float(value)
+                elif isinstance(value, (int, float, str, bool, type(None))):
+                    serializable_context[key] = value
+                else:
+                    serializable_context[key] = str(value)
+            context_str = json.dumps(serializable_context, indent=2)
+        else:
+            context_str = "None"
         
         prompt = f"""You are a senior investment banker and valuation expert. Analyze this company and determine the most appropriate valuation methodology.
 

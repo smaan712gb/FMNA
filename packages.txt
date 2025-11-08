@@ -1,3 +1,33 @@
+# Build tools
 build-essential
 gcc
 g++
+
+# Required for WeasyPrint (PDF generation)
+libcairo2
+libpango-1.0-0
+libpangocairo-1.0-0
+libgdk-pixbuf2.0-0
+libffi-dev
+shared-mime-info
+
+# Required for Plotly/Kaleido (interactive dashboards)
+libx11-6
+libx11-xcb1
+libxcomposite1
+libxcursor1
+libxdamage1
+libxi6
+libxtst6
+libnss3
+libcups2
+libxss1
+libxrandr2
+libasound2
+libatk1.0-0
+libatk-bridge2.0-0
+libgtk-3-0
+
+# Fonts (for proper rendering)
+fonts-liberation
+fonts-dejavu-core

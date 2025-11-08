@@ -1998,11 +1998,32 @@ class EnhancedExporterAgent:
             height=800,
             hovermode='closest'
         )
-        
+
         # Update axes labels
         fig.update_xaxes(title_text="Method", row=1, col=1)
         fig.update_yaxes(title_text="Value per Share ($)", row=1, col=1)
         
+        # Add AI Classification annotation if available
+        if all_data.get('ai_classification'):
+            ai_class = all_data['ai_classification']
+            ai_text = f"🤖 AI Classification: {ai_class.company_type.value.replace('_', ' ').title()}<br>"
+            ai_text += f"Stage: {ai_class.development_stage.value.replace('_', ' ').title()}<br>"
+            if all_data.get('ai_weighted_value'):
+                ai_text += f"AI Fair Value: ${all_data['ai_weighted_value']:.2f}"
+            
+            fig.add_annotation(
+                text=ai_text,
+                xref="paper", yref="paper",
+                x=0.98, y=0.98,
+                xanchor='right', yanchor='top',
+                showarrow=False,
+                bgcolor="rgba(173, 216, 230, 0.8)",
+                bordercolor="darkblue",
+                borderwidth=2,
+                borderpad=10,
+                font=dict(size=11, color="darkblue")
+            )
+
         # Save to HTML
         filename = f"{symbol}_Dashboard_{datetime.now().strftime('%Y%m%d_%H%M')}.html"
         filepath = self.outputs_dir / filename
@@ -3679,3 +3700,97 @@ if __name__ == "__main__":
     # This would be integrated with real data from ComprehensiveOrchestrator
     print("\nReady to generate board-grade outputs with real FMP/SEC data")
     print("=" *70)
+
+    
+    def _populate_ai_classification_tab(self, ws: Any, result: Any) -> None:
+        """Populate AI Classification worksheet"""
+        
+        # Header
+        ws['A1'] = 'AI-Powered Valuation Framework'
+        ws['A1'].font = Font(size=16, bold=True)
+        ws.merge_cells('A1:D1')
+        
+        row = 3
+        
+        # Classification Section
+        ws[f'A{row}'] = 'Company Classification'
+        ws[f'A{row}'].font = Font(size=12, bold=True)
+        row += 1
+        
+        ws[f'A{row}'] = 'Company Type:'
+        ws[f'B{row}'] = result.ai_classification.company_type.value.replace('_', ' ').title()
+        row += 1
+        
+        ws[f'A{row}'] = 'Development Stage:'
+        ws[f'B{row}'] = result.ai_classification.development_stage.value.replace('_', ' ').title()
+        row += 1
+        
+        ws[f'A{row}'] = 'Classification Confidence:'
+        ws[f'B{row}'] = f"{result.ai_classification.classification_confidence:.0%}"
+        row += 2
+        
+        # Key Value Drivers
+        ws[f'A{row}'] = 'Key Value Drivers'
+        ws[f'A{row}'].font = Font(size=12, bold=True)
+        row += 1
+        
+        for driver in result.ai_classification.key_value_drivers:
+            ws[f'A{row}'] = f"• {driver}"
+            row += 1
+        
+        row += 1
+        
+        # Methodology Weighting
+        if result.ai_weighted_value and result.ai_breakdown:
+            ws[f'A{row}'] = 'AI-Weighted Valuation'
+            ws[f'A{row}'].font = Font(size=12, bold=True)
+            row += 1
+            
+            ws[f'A{row}'] = 'AI Fair Value:'
+            ws[f'B{row}'] = result.ai_weighted_value
+            ws[f'B{row}'].number_format = '$#,##0.00'
+            ws[f'B{row}'].font = Font(bold=True)
+            row += 2
+            
+            ws[f'A{row}'] = 'Methodology Breakdown'
+            ws[f'A{row}'].font = Font(bold=True)
+            ws[f'B{row}'] = 'Weight'
+            ws[f'B{row}'].font = Font(bold=True)
+            ws[f'C{row}'] = 'Value'
+            ws[f'C{row}'].font = Font(bold=True)
+            ws[f'D{row}'] = 'Rationale'
+            ws[f'D{row}'].font = Font(bold=True)
+            row += 1
+            
+            for method_name, details in result.ai_breakdown.items():
+                if details.get('used'):
+                    ws[f'A{row}'] = method_name.upper()
+                    ws[f'B{row}'] = details['weight']
+                    ws[f'B{row}'].number_format = '0.0%'
+                    
+                    if details.get('value'):
+                        ws[f'C{row}'] = details['value']
+                        ws[f'C{row}'].number_format = '$#,##0.00'
+                    else:
+                        ws[f'C{row}'] = 'N/A'
+                    
+                    ws[f'D{row}'] = details['reason']
+                    row += 1
+            
+            row += 1
+        
+        # AI Reasoning
+        if result.ai_classification.reasoning:
+            ws[f'A{row}'] = 'Classification Reasoning'
+            ws[f'A{row}'].font = Font(size=12, bold=True)
+            row += 1
+            
+            ws[f'A{row}'] = result.ai_classification.reasoning
+            ws.merge_cells(f'A{row}:D{row+2}')
+            ws[f'A{row}'].alignment = Alignment(wrap_text=True, vertical='top')
+        
+        # Column widths
+        ws.column_dimensions['A'].width = 30
+        ws.column_dimensions['B'].width = 15
+        ws.column_dimensions['C'].width = 15
+        ws.column_dimensions['D'].width = 50

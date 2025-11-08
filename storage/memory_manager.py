@@ -604,3 +604,67 @@ if __name__ == "__main__":
     
     # Close
     mm.close()
+
+    
+    def store_ai_classification(
+        self,
+        ticker: str,
+        company_profile: Any,
+        weighted_value: float,
+        breakdown: Dict[str, Any],
+        session_id: Optional[str] = None
+    ) -> bool:
+        """
+        Store AI classification and valuation weighting
+        
+        Args:
+            ticker: Stock ticker
+            company_profile: CompanyProfile from AI engine
+            weighted_value: AI-weighted fair value
+            breakdown: Methodology breakdown
+            session_id: Optional session ID
+            
+        Returns:
+            Success status
+        """
+        try:
+            # Store in context for AI QA retrieval
+            ai_data = {
+                'company_type': company_profile.company_type.value,
+                'development_stage': company_profile.development_stage.value,
+                'key_value_drivers': company_profile.key_value_drivers,
+                'classification_confidence': company_profile.classification_confidence,
+                'reasoning': company_profile.reasoning,
+                'valuation_methodologies': [
+                    {
+                        'method': m.method_name,
+                        'weight': m.weight,
+                        'reason': m.reason,
+                        'focus_multiples': m.focus_multiples
+                    }
+                    for m in company_profile.valuation_methodologies if m.use
+                ],
+                'ai_weighted_value': weighted_value,
+                'methodology_breakdown': breakdown
+            }
+            
+            self.store_context(
+                context_type='ai_classification',
+                data=ai_data,
+                metadata={
+                    'ticker': ticker,
+                    'session_id': session_id or f'ai_{ticker}_{datetime.utcnow().strftime("%Y%m%d_%H%M%S")}',
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+            )
+            
+            logger.info(f"✓ Stored AI classification for {ticker}")
+            logger.info(f"  Type: {company_profile.company_type.value}")
+            logger.info(f"  Stage: {company_profile.development_stage.value}")
+            logger.info(f"  AI Fair Value: ${weighted_value:.2f}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store AI classification: {e}")
+            return False

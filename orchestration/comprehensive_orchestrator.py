@@ -42,6 +42,12 @@ class ComprehensiveAnalysisResult:
     data_sources_used: List[str]
     total_api_calls: int
     analysis_duration_seconds: float
+    
+    # AI Valuation Results
+    ai_classification: Optional[Any] = None
+    ai_weighted_value: Optional[float] = None
+    ai_explanation: Optional[str] = None
+    ai_breakdown: Optional[Dict[str, Any]] = None
 
 
 class ComprehensiveOrchestrator:
@@ -206,21 +212,21 @@ class ComprehensiveOrchestrator:
         logger.success("✓ Step 2 Complete - All valuations calculated")
         logger.info("")
         
-        # STEP 3: SEC FILING INGESTION (NEW)
+        # STEP 4: SEC FILING INGESTION
         logger.info("┏" + "━" * 78 + "┓")
-        logger.info("┃ STEP 3: SEC FILING INGESTION (10-K, 10-Q)")
+        logger.info("┃ STEP 4: SEC FILING INGESTION (10-K, 10-Q)")
         logger.info("┗" + "━" * 78 + "┛")
         
         filing_data = await self._ingest_sec_filings(symbol)
         
-        logger.success("✓ Step 3 Complete - SEC filings retrieved and parsed")
+        logger.success("✓ Step 5 Complete - SEC filings retrieved and parsed")
         logger.info("")
         
-        # STEP 4: DUE DILIGENCE (ENHANCED WITH FILING DATA)
+        # STEP 5: DUE DILIGENCE (ENHANCED WITH FILING DATA)
         dd_results = {}
         if run_full_dd:
             logger.info("┏" + "━" * 78 + "┓")
-            logger.info("┃ STEP 4: DUE DILIGENCE (6 Categories with SEC Data)")
+            logger.info("┃ STEP 5: DUE DILIGENCE (6 Categories with SEC Data)")
             logger.info("┗" + "━" * 78 + "┛")
             
             dd_results = await self._run_due_diligence(
@@ -230,12 +236,12 @@ class ComprehensiveOrchestrator:
                 filing_data=filing_data  # NOW INCLUDES SEC FILING DATA
             )
             
-            logger.success(f"✓ Step 4 Complete - {sum(len(risks) for risks in dd_results.values())} risks identified")
+            logger.success(f"✓ Step 5 Complete - {sum(len(risks) for risks in dd_results.values())} risks identified")
             logger.info("")
         
-        # STEP 5: SYNTHESIS & STORAGE
+        # STEP 6: SYNTHESIS & STORAGE
         logger.info("┏" + "━" * 78 + "┓")
-        logger.info("┃ STEP 5: SYNTHESIS & STORAGE")
+        logger.info("┃ STEP 6: SYNTHESIS & STORAGE")
         logger.info("┗" + "━" * 78 + "┛")
         
         duration = (datetime.utcnow() - start_time).total_seconds()
@@ -254,10 +260,16 @@ class ComprehensiveOrchestrator:
             analysis_duration_seconds=duration
         )
         
+        # Add AI valuation results
+        result.ai_classification = getattr(valuation, 'ai_classification', None)
+        result.ai_weighted_value = getattr(valuation, 'ai_weighted_value', None)
+        result.ai_explanation = getattr(valuation, 'ai_explanation', None)
+        result.ai_breakdown = getattr(valuation, 'ai_breakdown', None)
+        
         # Store in database
         await self._store_results(result, filing_data)
         
-        logger.success("✓ Step 5 Complete - Results stored")
+        logger.success("✓ Step 6 Complete - Results stored")
         logger.info("")
         
         # FINAL SUMMARY
@@ -1103,6 +1115,17 @@ class ComprehensiveOrchestrator:
             # Store valuation in memory (existing)
             await self.modeling.store_valuation_in_memory(result.valuation)
             logger.success("   ✓ Valuation package stored")
+            
+            # Store AI classification if available
+            if result.ai_classification and result.ai_weighted_value:
+                self.modeling.memory.store_ai_classification(
+                    ticker=result.symbol,
+                    company_profile=result.ai_classification,
+                    weighted_value=result.ai_weighted_value,
+                    breakdown=result.ai_breakdown,
+                    session_id=comprehensive_memory.session_id
+                )
+                logger.success("   ✓ AI classification stored for QA retrieval")
             
             # CRITICAL: Store FULL analysis result including SEC filing data
             # This includes DD risks, financial data, peer data, AND SEC filing excerpts

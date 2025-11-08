@@ -48,6 +48,12 @@ class ValuationPackage:
     key_drivers: List[str] = None
     risk_factors: List[str] = None
     llm_summary: str = ""
+    
+    # AI Valuation Results
+    ai_classification: Optional[Any] = None
+    ai_weighted_value: Optional[float] = None
+    ai_explanation: Optional[str] = None
+    ai_breakdown: Optional[Dict[str, Any]] = None
 
 
 class ModelingAgent:
@@ -489,7 +495,16 @@ Format as concise executive summary (3-4 paragraphs)."""
                 'key_drivers': package.key_drivers,
                 'risk_factors': package.risk_factors,
                 'llm_summary': package.llm_summary
-            }
+            },
+                'ai_classification': {
+                    'company_type': package.ai_classification.company_type.value if package.ai_classification else None,
+                    'development_stage': package.ai_classification.development_stage.value if package.ai_classification else None,
+                    'key_value_drivers': package.ai_classification.key_value_drivers if package.ai_classification else [],
+                    'classification_confidence': package.ai_classification.classification_confidence if package.ai_classification else None,
+                    'reasoning': package.ai_classification.reasoning if package.ai_classification else None
+                } if package.ai_classification else None,
+                'ai_weighted_value': package.ai_weighted_value,
+                'ai_breakdown': package.ai_breakdown
             
             # Create AnalysisMemory object
             memory = AnalysisMemory(

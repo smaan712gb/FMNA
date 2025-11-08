@@ -340,18 +340,30 @@ class ComprehensiveOrchestrator:
         """
         Ingest peer company data from FMP API with STRICT validation
         
+        FIX: Always use ANNUAL for peers (most complete data)
+        TTM/Quarterly endpoints have incomplete peer data
+        
         Returns REAL PEER DATA - NO FALLBACKS OR DEFAULTS
         """
+        # HYBRID PERIOD STRATEGY: Use annual for peers even if target uses TTM/quarterly
+        # This is industry-standard practice - multiples are period-agnostic
+        peer_period = "annual" if period in ["ttm", "quarter"] else period
+        
         logger.info(f"📥 Fetching peer companies for {symbol} from FMP API...")
         logger.info(f"   ⚙ Minimum required: {minimum_required} with COMPLETE data")
-        logger.info(f"   ⚙ Period: {period.upper()}")
+        logger.info(f"   ⚙ Target Period: {period.upper()}")
+        logger.info(f"   ⚙ Peer Period: {peer_period.upper()}")
+        
+        if peer_period != period:
+            logger.info(f"   ℹ️ Using {peer_period.upper()} for peers (more complete than {period.upper()})")
+            logger.info(f"   ℹ️ This is standard practice - valuation multiples are period-agnostic")
         
         try:
             peers_data = self.ingestion.fmp.get_peers_with_complete_data(
                 symbol=symbol,
                 max_peers=10,
                 minimum_required=minimum_required,
-                period=period,
+                period=peer_period,  # ✅ Use most complete period for peers
                 strict_mode=True  # NO FALLBACKS
             )
             

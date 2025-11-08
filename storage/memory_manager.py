@@ -116,7 +116,15 @@ class MemoryManager:
             Success status
         """
         try:
-            # Store in DuckDB for structured queries
+            # Custom JSON encoder for Decimal types
+            import decimal
+            
+            def decimal_default(obj):
+                if isinstance(obj, decimal.Decimal):
+                    return float(obj)
+                raise TypeError
+            
+            # Store in DuckDB for structured queries with Decimal handling
             self.db.execute("""
                 INSERT INTO analysis_history 
                 (session_id, ticker, timestamp, context, results, metadata)
@@ -125,9 +133,9 @@ class MemoryManager:
                 memory.session_id,
                 memory.ticker,
                 memory.timestamp,
-                json.dumps(memory.context),
-                json.dumps(memory.results),
-                json.dumps(memory.metadata or {})
+                json.dumps(memory.context, default=decimal_default),
+                json.dumps(memory.results, default=decimal_default),
+                json.dumps(memory.metadata or {}, default=decimal_default)
             ))
             
             # Store in ChromaDB for semantic search (if available)

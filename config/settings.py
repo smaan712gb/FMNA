@@ -93,6 +93,12 @@ class Settings(BaseSettings):
         description="FMP API rate limit (calls per minute)"
     )
     
+    # SEC Configuration
+    sec_rate_limit: int = Field(
+        default=10,
+        description="SEC rate limit (requests per second)"
+    )
+    
     # Data Configuration
     default_period: str = Field(
         default_factory=lambda: get_secret('DEFAULT_PERIOD', 'annual'),

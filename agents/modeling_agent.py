@@ -494,8 +494,7 @@ Format as concise executive summary (3-4 paragraphs)."""
                 } if package.merger_result else None,
                 'key_drivers': package.key_drivers,
                 'risk_factors': package.risk_factors,
-                'llm_summary': package.llm_summary
-            },
+                'llm_summary': package.llm_summary,
                 'ai_classification': {
                     'company_type': package.ai_classification.company_type.value if package.ai_classification else None,
                     'development_stage': package.ai_classification.development_stage.value if package.ai_classification else None,
@@ -505,6 +504,7 @@ Format as concise executive summary (3-4 paragraphs)."""
                 } if package.ai_classification else None,
                 'ai_weighted_value': package.ai_weighted_value,
                 'ai_breakdown': package.ai_breakdown
+            }
             
             # Create AnalysisMemory object
             memory = AnalysisMemory(

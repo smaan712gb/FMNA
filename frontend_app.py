@@ -1052,6 +1052,76 @@ def show_results_page():
             vr = result.valuation.valuation_range
             st.write(f"**Valuation Range:** ${vr[0]:.2f} - ${vr[1]:.2f}")
     
+    # AI Valuation Results - SHOW FIRST!
+    if hasattr(result, 'ai_classification') and result.ai_classification:
+        st.markdown("### 🤖 AI-Powered Company Classification & Weighted Valuation")
+        
+        ai_class = result.ai_classification
+        ai_weighted = result.ai_weighted_value
+        ai_explanation = result.ai_explanation
+        ai_breakdown = result.ai_breakdown
+        
+        # Summary Card
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if hasattr(ai_class, 'company_type'):
+                st.metric("Company Type", ai_class.company_type.value if hasattr(ai_class.company_type, 'value') else str(ai_class.company_type))
+        
+        with col2:
+            if hasattr(ai_class, 'development_stage'):
+                st.metric("Development Stage", ai_class.development_stage.value if hasattr(ai_class.development_stage, 'value') else str(ai_class.development_stage))
+        
+        with col3:
+            if hasattr(ai_class, 'classification_confidence'):
+                st.metric("AI Confidence", f"{ai_class.classification_confidence*100:.0f}%")
+        
+        with col4:
+            if ai_weighted:
+                st.metric("AI Weighted Value", f"${ai_weighted:.2f}/share")
+        
+        # Expanded Details
+        with st.expander("🤖 View Complete AI Analysis"):
+            # Classification Reasoning
+            if hasattr(ai_class, 'reasoning'):
+                st.markdown("**🧠 Classification Reasoning:**")
+                st.info(ai_class.reasoning)
+            
+            # Key Value Drivers
+            if hasattr(ai_class, 'key_value_drivers') and ai_class.key_value_drivers:
+                st.markdown("**💡 Key Value Drivers Identified:**")
+                for driver in ai_class.key_value_drivers:
+                    st.write(f"- {driver}")
+            
+            # Methodology Weights
+            if ai_breakdown:
+                st.markdown("**⚖️ AI-Determined Methodology Weights:**")
+                
+                breakdown_data = []
+                for method, details in ai_breakdown.items():
+                    breakdown_data.append({
+                        'Method': method,
+                        'Weight': f"{details.get('weight', 0)*100:.1f}%",
+                        'Value': f"${details.get('value', 0):.2f}",
+                        'Trust Level': details.get('trust_level', 'N/A'),
+                        'Reasoning': details.get('reasoning', 'N/A')
+                    })
+                
+                if breakdown_data:
+                    st.dataframe(pd.DataFrame(breakdown_data), use_container_width=True)
+            
+            # AI Explanation
+            if ai_explanation:
+                st.markdown("**📝 AI Valuation Methodology Explanation:**")
+                st.markdown(ai_explanation)
+            
+            # Recommended Approach
+            if hasattr(ai_class, 'recommended_approach'):
+                st.markdown("**✅ Recommended Valuation Approach:**")
+                st.success(ai_class.recommended_approach)
+        
+        st.markdown("---")
+    
     # Summary metrics - display ALL available valuations
     st.markdown("### 💰 Valuation Methods Results")
     

@@ -17,6 +17,7 @@ from engines import (
     WACCInputs, TerminalValueInputs, PeerMetrics,
     GrowthScenarioInputs, GrowthStage, Industry
 )
+from engines.ai_valuation_engine import AIValuationEngine, CompanyProfile
 from storage.duckdb_adapter import DuckDBAdapter
 from config.settings import get_settings
 
@@ -73,6 +74,9 @@ class ComprehensiveOrchestrator:
         self.db = DuckDBAdapter()
         self.settings = get_settings()
         
+        # Initialize AI Valuation Engine
+        self.ai_valuation = AIValuationEngine()
+        
         # Tracking metrics
         self.api_calls_made = 0
         self.data_sources = []
@@ -82,6 +86,7 @@ class ComprehensiveOrchestrator:
         logger.info("  - ModelingAgent (5 valuation engines)")
         logger.info("  - DDAgentsSuite (6 DD agents)")
         logger.info("  - SECClient (FREE - no API key)")
+        logger.info("  - AI ValuationEngine (DeepSeek-powered)")
         logger.info(f"  - Default Period: {self.settings.default_period.upper()}")
         logger.info(f"  - Data Source: FMP API (native TTM support)")
         logger.info("="*80)
@@ -138,9 +143,51 @@ class ComprehensiveOrchestrator:
         logger.success(f"✓ Step 1 Complete - {self.api_calls_made} API calls to FMP")
         logger.info("")
         
-        # STEP 2: VALUATION MODELS
+        # STEP 2: AI COMPANY CLASSIFICATION
         logger.info("┏" + "━" * 78 + "┓")
-        logger.info("┃ STEP 2: VALUATION MODELS (DCF, CCA, Growth)")
+        logger.info("┃ STEP 2: AI COMPANY CLASSIFICATION & METHODOLOGY SELECTION")
+        logger.info("┗" + "━" * 78 + "┛")
+        
+        # Classify company using AI to determine appropriate valuation methodologies
+        profile = financial_data.get('profile')
+        income_stmt = financial_data.get('income_statement', [])[0] if financial_data.get('income_statement') else {}
+        balance_sheet = financial_data.get('balance_sheet', [])[0] if financial_data.get('balance_sheet') else {}
+        cash_flow = financial_data.get('cash_flow', [])[0] if financial_data.get('cash_flow') else {}
+        income_statements = financial_data.get('income_statement', [])
+        
+        # Calculate revenue growth
+        revenue_growth = 0.0
+        if len(income_statements) >= 2:
+            current_rev = float(income_statements[0].get('revenue', 0))
+            prior_rev = float(income_statements[1].get('revenue', 1))
+            revenue_growth = (current_rev / prior_rev - 1) if prior_rev > 0 else 0.0
+        
+        # Classify company
+        company_profile = self.ai_valuation.classify_company(
+            company_name=profile.legal_name if profile else symbol,
+            description=profile.description if profile and hasattr(profile, 'description') else "",
+            industry=profile.industry if profile and hasattr(profile, 'industry') else "Technology",
+            revenue=float(income_stmt.get('revenue', 0)),
+            revenue_growth=revenue_growth,
+            ebitda=float(income_stmt.get('ebitda', 0)),
+            fcf=float(cash_flow.get('freeCashFlow', 0)),
+            rd_expense=float(income_stmt.get('researchAndDevelopmentExpenses', 0)),
+            additional_context={
+                'sector': profile.sector if profile and hasattr(profile, 'sector') else None,
+                'market_cap': financial_data.get('market_snapshot', {}).get('market_cap')
+            }
+        )
+        
+        logger.success("✓ AI Classification Complete")
+        logger.info(f"  🤖 Company Type: {company_profile.company_type.value}")
+        logger.info(f"  📊 Development Stage: {company_profile.development_stage.value}")
+        logger.info(f"  🎯 Confidence: {company_profile.classification_confidence:.0%}")
+        logger.info(f"  💡 Key Drivers: {', '.join(company_profile.key_value_drivers[:3])}")
+        logger.info("")
+        
+        # STEP 3: VALUATION MODELS (AI-Weighted)
+        logger.info("┏" + "━" * 78 + "┓")
+        logger.info("┃ STEP 3: VALUATION MODELS (AI-Weighted)")
         logger.info("┗" + "━" * 78 + "┛")
         
         valuation = await self._run_valuation_models(

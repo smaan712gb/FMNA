@@ -93,6 +93,16 @@ class EnhancedExporterAgent:
         
         logger.info(f"Enhanced Exporter Agent initialized - outputs: {self.outputs_dir}")
     
+    def _calculate_revenue_drivers(self, financial_data: Dict, market_data: Dict, 
+                                   company_name: str = "") -> Dict[str, float]:
+        """
+        Calculate revenue drivers from available financial data
+        Uses industry heuristics when direct data not available
+        """
+        from fix_revenue_drivers_and_scenarios import RevenueDriverCalculator
+        calculator = RevenueDriverCalculator()
+        return calculator.calculate_revenue_drivers(financial_data, market_data, company_name)
+    
     def export_comprehensive_excel_model(
         self,
         symbol: str,
@@ -3400,6 +3410,17 @@ class EnhancedExporterAgent:
             ebitda_margin = (ebitda / revenue) if revenue > 0 else 0
             net_margin = (net_income / revenue) if revenue > 0 else 0
             
+            # Calculate revenue drivers using industry heuristics
+            revenue_drivers = self._calculate_revenue_drivers(
+                financial_data=financial_data,
+                market_data={
+                    'market_cap': float(market_snapshot.get('market_cap', 0)),
+                    'price': float(market_snapshot.get('price', 0)),
+                    'eps': float(market_snapshot.get('eps', 0))
+                },
+                company_name=company_name
+            )
+            
             # Build comprehensive data dictionary with REAL extracted data
             all_data = {
                 'symbol': symbol,
@@ -3441,12 +3462,13 @@ class EnhancedExporterAgent:
                     'inventory_writedowns': 0
                 },
                 'business_drivers': {
-                    # Units/customers not available from FMP data
-                    # 'units_sold': 0,
-                    # 'avg_price': 0,
-                    # 'customers': 0,
-                    # 'revenue_per_customer': 0,
-                    'market_share': 0,  # Market share requires industry data not available from FMP
+                    # Revenue drivers calculated from RevenueDriverCalculator
+                    'units_sold': revenue_drivers.get('units_sold', 0),
+                    'avg_price': revenue_drivers.get('avg_price', 0),
+                    'customers': revenue_drivers.get('customers', 0),
+                    'revenue_per_customer': revenue_drivers.get('revenue_per_customer', 0),
+                    'market_share': revenue_drivers.get('market_share', 0),
+                    # Profitability drivers
                     'gross_margin': gross_margin,
                     'ebitda_margin': ebitda_margin,
                     'operating_leverage': 1.2,  # Typical range

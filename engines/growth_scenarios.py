@@ -432,54 +432,80 @@ class GrowthScenariosEngine:
         terminal_ebitda = projections[-1]['EBITDA']
         terminal_fcf = projections[-1]['FCF']
         
-        # Calculate comprehensive distress metrics
-        # Altman Z-Score
-        retained_earnings = inputs.retained_earnings if inputs.retained_earnings else inputs.total_assets * 0.2
-        market_value_equity = inputs.market_value_equity if inputs.market_value_equity else (inputs.total_assets - inputs.total_debt)
-        total_liabilities = inputs.book_value_liabilities if inputs.book_value_liabilities else inputs.total_debt
+        # PROJECT TERMINAL YEAR FINANCIALS FOR SCENARIO-SPECIFIC DISTRESS METRICS
+        # This ensures Bear/Base/Bull scenarios have DIFFERENT Z-Scores and distress metrics
         
+        # Project total assets based on revenue growth and asset turnover
+        asset_turnover = inputs.revenue / inputs.total_assets if inputs.total_assets > 0 else 1.0
+        terminal_total_assets = terminal_revenue / asset_turnover
+        
+        # Project working capital based on terminal revenue
+        terminal_working_capital = terminal_revenue * inputs.nwc_pct_revenue
+        
+        # Project current assets (working capital + cash)
+        terminal_current_assets = terminal_working_capital + inputs.cash * 1.1  # Assume modest cash growth
+        
+        # Project retained earnings (cumulative income over projection period)
+        cumulative_fcf = sum([p['FCF'] for p in projections])
+        terminal_retained_earnings = (inputs.retained_earnings if inputs.retained_earnings else inputs.total_assets * 0.2) + cumulative_fcf
+        
+        # Project debt (assume stable or slight reduction)
+        terminal_debt = inputs.total_debt * 0.95  # Assume 5% debt paydown
+        
+        # Project total liabilities
+        terminal_total_liabilities = terminal_debt + inputs.current_liabilities
+        
+        # Project market value of equity (based on terminal performance)
+        # Better performance = higher valuation multiple
+        ebitda_multiple = 15.0 if terminal_fcf > 0 else 8.0  # Higher multiple if FCF positive
+        terminal_market_value_equity = terminal_ebitda * ebitda_multiple
+        
+        # Calculate EBIT (EBITDA - D&A, estimate D&A as 3% of revenue)
+        terminal_ebit = terminal_ebitda - (terminal_revenue * 0.03)
+        
+        # NOW calculate distress metrics using PROJECTED terminal financials
         z_score = self.calculate_altman_z_score(
-            working_capital=inputs.working_capital,
-            total_assets=inputs.total_assets,
-            retained_earnings=retained_earnings,
-            ebit=inputs.ebit,
-            market_value_equity=market_value_equity,
-            total_liabilities=total_liabilities,
-            sales=inputs.revenue
+            working_capital=terminal_working_capital,  # ✅ Scenario-specific
+            total_assets=terminal_total_assets,  # ✅ Scenario-specific
+            retained_earnings=terminal_retained_earnings,  # ✅ Scenario-specific
+            ebit=terminal_ebit,  # ✅ Scenario-specific
+            market_value_equity=terminal_market_value_equity,  # ✅ Scenario-specific
+            total_liabilities=terminal_total_liabilities,  # ✅ Scenario-specific
+            sales=terminal_revenue  # ✅ Scenario-specific
         )
         
-        # Ohlson O-Score
-        current_assets = inputs.current_assets if inputs.current_assets > 0 else inputs.total_assets * 0.5
-        funds_operations = inputs.ebitda - (inputs.revenue * 0.05)  # Estimate FOF
-        negative_earnings_2years = inputs.net_income < 0
+        # Ohlson O-Score - use PROJECTED terminal financials
+        terminal_current_liabilities = inputs.current_liabilities  # Assume stable
+        funds_operations = terminal_ebitda - (terminal_revenue * 0.05)  # Estimate FOF
+        terminal_net_income = terminal_ebit * (1 - inputs.tax_rate)  # Estimate net income
+        negative_earnings_2years = terminal_net_income < 0
         
         o_score = self.calculate_ohlson_o_score(
-            total_assets=inputs.total_assets,
-            total_liabilities=total_liabilities,
-            working_capital=inputs.working_capital,
-            current_liabilities=inputs.current_liabilities,
-            current_assets=current_assets,
-            net_income=inputs.net_income,
-            funds_operations=funds_operations,
+            total_assets=terminal_total_assets,  # ✅ Scenario-specific
+            total_liabilities=terminal_total_liabilities,  # ✅ Scenario-specific
+            working_capital=terminal_working_capital,  # ✅ Scenario-specific
+            current_liabilities=terminal_current_liabilities,
+            current_assets=terminal_current_assets,  # ✅ Scenario-specific
+            net_income=terminal_net_income,  # ✅ Scenario-specific
+            funds_operations=funds_operations,  # ✅ Scenario-specific
             negative_earnings_2years=negative_earnings_2years
         )
         
-        # Calculate financial health ratios
+        # Calculate financial health ratios using PROJECTED terminal values
         # Interest Coverage Ratio (EBIT / Interest Expense)
-        # Estimate interest expense as 5% of total debt if not provided
-        interest_expense = inputs.total_debt * 0.05
-        interest_coverage = inputs.ebit / interest_expense if interest_expense > 0 else 999
+        interest_expense = terminal_debt * 0.05  # ✅ Use terminal debt
+        interest_coverage = terminal_ebit / interest_expense if interest_expense > 0 else 999
         
         # Debt/EBITDA
-        debt_to_ebitda = inputs.total_debt / inputs.ebitda if inputs.ebitda > 0 else 0
+        debt_to_ebitda = terminal_debt / terminal_ebitda if terminal_ebitda > 0 else 0
         
         # Current Ratio (Current Assets / Current Liabilities)
-        current_ratio = current_assets / inputs.current_liabilities if inputs.current_liabilities > 0 else 0
+        current_ratio = terminal_current_assets / terminal_current_liabilities if terminal_current_liabilities > 0 else 0
         
         # Quick Ratio ((Current Assets - Inventory) / Current Liabilities)
-        # Estimate inventory as 30% of current assets if not provided
-        inventory = current_assets * 0.30
-        quick_ratio = (current_assets - inventory) / inputs.current_liabilities if inputs.current_liabilities > 0 else 0
+        # Estimate inventory as 30% of current assets
+        terminal_inventory = terminal_current_assets * 0.30
+        quick_ratio = (terminal_current_assets - terminal_inventory) / terminal_current_liabilities if terminal_current_liabilities > 0 else 0
         
         # Cash burn months (Cash / Monthly Burn Rate)
         # If FCF is negative, estimate months of cash runway

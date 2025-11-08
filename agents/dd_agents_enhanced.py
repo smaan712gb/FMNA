@@ -318,7 +318,7 @@ class EnhancedCommercialDDAgent:
                 symbol=symbol, category="Commercial", subcategory="Market Position",
                 severity="Low",
                 title="Mega-Cap Limited Growth Runway",
-                description=f"Market cap of ${market_cap/1e9:.0f}B limits addressable growth opportunities",
+                description=f"Market cap of ${float(market_cap)/1e9:.0f}B limits addressable growth opportunities",
                 impact=None, probability=0.4,
                 mitigation="Focus on market expansion, new product categories",
                 source_ref="Commercial Analysis"

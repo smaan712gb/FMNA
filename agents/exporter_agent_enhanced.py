@@ -201,7 +201,12 @@ class EnhancedExporterAgent:
             ws_growth = wb.create_sheet("Growth_Scenarios")
             self._create_growth_scenarios_tab(ws_growth, all_data['growth_scenarios'])
         
-        # Tab 14: Audit Trail
+        # Tab 14: Monte Carlo Simulation (if DCF ran with MC)
+        if all_data.get('dcf_result') and hasattr(all_data['dcf_result'], 'monte_carlo'):
+            ws_mc = wb.create_sheet("Monte_Carlo_DCF")
+            self._create_monte_carlo_tab(ws_mc, all_data['dcf_result'].monte_carlo)
+        
+        # Tab 15: Audit Trail
         ws_audit = wb.create_sheet("Audit_Trail")
         self._create_audit_trail_tab(ws_audit, all_data.get('audit_info', {}))
         
@@ -315,7 +320,14 @@ class EnhancedExporterAgent:
         if all_data.get('lbo_result'):
             lbo = all_data['lbo_result']
             # Infer value from IRR if available
-            implied_value = all_data.get('market_data', {}).get('current_price', 150)
+            # FIX: Calculate LBO value from model, not current price
+            lbo = all_data['lbo_result']
+            # Use midpoint of value range if available
+            if hasattr(lbo, 'min_value_per_share') and hasattr(lbo, 'max_value_per_share'):
+                implied_value = (lbo.min_value_per_share + lbo.max_value_per_share) / 2
+            else:
+                # Estimate from IRR: rough approximation
+                implied_value = all_data.get('market_data', {}).get('current_price', 150) * (1 + lbo.equity_irr) ** 5 / lbo.equity_moic if lbo.equity_moic > 0 else all_data.get('market_data', {}).get('current_price', 150)
             ws[f'A{row}'] = "Leveraged Buyout"
             ws[f'B{row}'] = implied_value * 0.8
             ws[f'C{row}'] = implied_value
@@ -460,6 +472,12 @@ class EnhancedExporterAgent:
         
         ws[f'A{row}'] = "Adjusted EBITDA"
         ws[f'B{row}'] = qoe_adjustments.get('reported_ebitda', 0) + total_adj
+        
+        # Add note if no adjustments
+        if total_adj == 0:
+            row += 2
+            ws[f'A{row}'] = "Note: No material quality of earnings adjustments identified"
+            ws[f'A{row}'].font = Font(italic=True, size=9, color=IB_COLORS.GRAY)
         ws[f'B{row}'].number_format = '$#,##0'
         ws[f'B{row}'].font = Font(bold=True, color=IB_COLORS.GREEN)
         
@@ -1561,6 +1579,141 @@ class EnhancedExporterAgent:
         ws.column_dimensions['A'].width = 35
         for col in ['B', 'C', 'D']:
             ws.column_dimensions[col].width = 18
+    
+    def _create_monte_carlo_tab(self, ws, mc_results: Dict[str, Any]):
+        """Create Monte Carlo simulation results tab"""
+        ws['A1'] = "MONTE CARLO SIMULATION - DCF VALUATION"
+        ws['A1'].font = Font(size=14, bold=True)
+        
+        row = 3
+        
+        # Summary Statistics
+        ws[f'A{row}'] = "SIMULATION STATISTICS (10,000 Iterations)"
+        ws[f'A{row}'].font = Font(bold=True, size=12)
+        ws[f'A{row}'].fill = PatternFill(start_color=IB_COLORS.LIGHT_BLUE,
+                                         end_color=IB_COLORS.LIGHT_BLUE,
+                                         fill_type="solid")
+        ws.merge_cells(f'A{row}:B{row}')
+        row += 1
+        
+        stats = {
+            'Number of Simulations': mc_results.get('simulations', 10000),
+            'Mean Value per Share': mc_results.get('mean', 0),
+            'Median Value per Share (P50)': mc_results.get('median', 0),
+            'Standard Deviation': mc_results.get('std', 0),
+            'Minimum Value': mc_results.get('min', 0),
+            'Maximum Value': mc_results.get('max', 0),
+        }
+        
+        for metric, value in stats.items():
+            ws[f'A{row}'] = metric
+            ws[f'B{row}'] = value
+            if 'Share' in metric or 'Value' in metric or 'Deviation' in metric:
+                ws[f'B{row}'].number_format = '$#,##0.00'
+            else:
+                ws[f'B{row}'].number_format = '#,##0'
+            
+            if 'Median' in metric:
+                ws[f'B{row}'].font = Font(bold=True, color=IB_COLORS.GREEN, size=11)
+            
+            row += 1
+        
+        row += 2
+        
+        # Confidence Intervals
+        ws[f'A{row}'] = "CONFIDENCE INTERVALS"
+        ws[f'A{row}'].font = Font(bold=True, size=12)
+        ws[f'A{row}'].fill = PatternFill(start_color=IB_COLORS.LIGHT_BLUE,
+                                         end_color=IB_COLORS.LIGHT_BLUE,
+                                         fill_type="solid")
+        ws.merge_cells(f'A{row}:B{row}')
+        row += 1
+        
+        percentiles = {
+            '10th Percentile (P10) - Downside Case': mc_results.get('p10', 0),
+            '25th Percentile (P25) - Lower Quartile': mc_results.get('p25', 0),
+            'Median (P50) - Most Likely Outcome': mc_results.get('median', 0),
+            '75th Percentile (P75) - Upper Quartile': mc_results.get('p75', 0),
+            '90th Percentile (P90) - Upside Case': mc_results.get('p90', 0),
+        }
+        
+        for label, value in percentiles.items():
+            ws[f'A{row}'] = label
+            ws[f'B{row}'] = value
+            ws[f'B{row}'].number_format = '$#,##0.00'
+            
+            if 'Median' in label:
+                ws[f'B{row}'].font = Font(bold=True, size=12, color=IB_COLORS.GREEN)
+                ws[f'B{row}'].fill = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
+            elif 'P10' in label or 'P90' in label:
+                ws[f'B{row}'].font = Font(bold=True, size=11)
+            
+            row += 1
+        
+        row += 2
+        
+        # Risk/Reward Assessment
+        ws[f'A{row}'] = "RISK / REWARD ASSESSMENT"
+        ws[f'A{row}'].font = Font(bold=True, size=12)
+        ws[f'A{row}'].fill = PatternFill(start_color=IB_COLORS.LIGHT_BLUE,
+                                         end_color=IB_COLORS.LIGHT_BLUE,
+                                         fill_type="solid")
+        ws.merge_cells(f'A{row}:C{row}')
+        row += 1
+        
+        median = mc_results.get('median', 0)
+        p10 = mc_results.get('p10', 0)
+        p90 = mc_results.get('p90', 0)
+        
+        downside_risk = ((median - p10) / median * 100) if median > 0 else 0
+        upside_potential = ((p90 - median) / median * 100) if median > 0 else 0
+        
+        ws[f'A{row}'] = "Downside Risk (Median to P10)"
+        ws[f'B{row}'] = downside_risk / 100
+        ws[f'B{row}'].number_format = '0.0%'
+        ws[f'C{row}'] = median - p10
+        ws[f'C{row}'].number_format = '$#,##0.00'
+        row += 1
+        
+        ws[f'A{row}'] = "Upside Potential (P90 to Median)"
+        ws[f'B{row}'] = upside_potential / 100
+        ws[f'B{row}'].number_format = '0.0%'
+        ws[f'C{row}'] = p90 - median
+        ws[f'C{row}'].number_format = '$#,##0.00'
+        row += 1
+        
+        ws[f'A{row}'] = "80% Confidence Interval"
+        ws[f'B{row}'] = f"${p10:.2f} - ${p90:.2f}"
+        ws[f'B{row}'].font = Font(bold=True, size=11)
+        ws.merge_cells(f'B{row}:C{row}')
+        row += 2
+        
+        # Interpretation
+        ws[f'A{row}'] = "INTERPRETATION:"
+        ws[f'A{row}'].font = Font(bold=True, size=11)
+        ws[f'A{row}'].fill = PatternFill(start_color=IB_COLORS.YELLOW,
+                                         end_color=IB_COLORS.YELLOW,
+                                         fill_type="solid")
+        ws.merge_cells(f'A{row}:C{row}')
+        row += 1
+        
+        ws[f'A{row}'] = "• We are 80% confident the true value lies between P10 and P90"
+        ws[f'A{row}'].font = Font(italic=True, size=10)
+        ws.merge_cells(f'A{row}:C{row}')
+        row +=  1
+        
+        ws[f'A{row}'] = f"• Downside risk of {downside_risk:.1f}% vs upside potential of {upside_potential:.1f}%"
+        ws[f'A{row}'].font = Font(italic=True, size=10)
+        ws.merge_cells(f'A{row}:C{row}')
+        row += 1
+        
+        ws[f'A{row}'] = "• Monte Carlo accounts for uncertainty in WACC, growth rates, and cash flows"
+        ws[f'A{row}'].font = Font(italic=True, size=10)
+        ws.merge_cells(f'A{row}:C{row}')
+        
+        ws.column_dimensions['A'].width = 45
+        ws.column_dimensions['B'].width = 18
+        ws.column_dimensions['C'].width = 15
     
     def _create_audit_trail_tab(self, ws, audit_info: Dict):
         """Create audit trail tab"""
@@ -2834,12 +2987,14 @@ class EnhancedExporterAgent:
         financials = all_data.get('financials', {})
         if financials and financials.get('revenue'):
             revenues = financials.get('revenue', [])
-            doc.add_paragraph(f"LTM Revenue: ${revenues[-1] / 1e6:.1f}M")
+            # FIX: Use [0] not [-1] - FMP data is reverse chronological (newest first)
+            doc.add_paragraph(f"LTM Revenue: ${revenues[0] / 1e6:.1f}M")
             
             ebitdas = financials.get('ebitda', [])
             if ebitdas:
-                doc.add_paragraph(f"LTM EBITDA: ${ebitdas[-1] / 1e6:.1f}M")
-                doc.add_paragraph(f"EBITDA Margin: {(ebitdas[-1] / revenues[-1] * 100):.1f}%")
+                # FIX: Use [0] not [-1] for most recent EBITDA
+                doc.add_paragraph(f"LTM EBITDA: ${ebitdas[0] / 1e6:.1f}M")
+                doc.add_paragraph(f"EBITDA Margin: {(ebitdas[0] / revenues[0] * 100):.1f}%")
         
         # Valuation Analysis
         doc.add_heading("4. Valuation Analysis", 1)
@@ -3265,11 +3420,12 @@ class EnhancedExporterAgent:
                     'inventory_writedowns': 0
                 },
                 'business_drivers': {
-                    'units_sold': 0,
-                    'avg_price': 0,
-                    'customers': 0,
-                    'revenue_per_customer': 0,
-                    'market_share': float(latest_metrics.get('marketCap', 0)) / 1e12 * 100 if latest_metrics.get('marketCap') else 0,  # Rough approximation
+                    # Units/customers not available from FMP data
+                    # 'units_sold': 0,
+                    # 'avg_price': 0,
+                    # 'customers': 0,
+                    # 'revenue_per_customer': 0,
+                    'market_share': 0,  # Market share requires industry data not available from FMP
                     'gross_margin': gross_margin,
                     'ebitda_margin': ebitda_margin,
                     'operating_leverage': 1.2,  # Typical range

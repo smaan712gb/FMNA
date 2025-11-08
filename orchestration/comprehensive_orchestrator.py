@@ -398,12 +398,21 @@ class ComprehensiveOrchestrator:
                     perpetual_growth_rate=0.025
                 )
                 
-                # Build FCFF forecast from cash flow data
-                cf_statements = financial_data.get('cash_flow', [])
+                # ACTIVATION: Use 3SM FCFF if available, else build manually
+                # Check if Three Statement Model was run and has FCFF
+                if three_statement_result and hasattr(three_statement_result, 'fcf_forecast') and three_statement_result.fcf_forecast:
+                    fcff_forecast = three_statement_result.fcf_forecast
+                    logger.info(f"   ✅ Using FCFF from 3-Statement Model ({len(fcff_forecast)} periods)")
+                else:
+                    # Fallback: Build FCFF forecast from cash flow data
+                    cf_statements = financial_data.get('cash_flow', [])
                 fcff_forecast = []
                 for cf in cf_statements[:5]:
                     fcf = float(cf.get('freeCashFlow', 0))
                     fcff_forecast.append(fcf)
+                    # DEBUG: Log first FCF value to verify units
+                    if len(fcff_forecast) == 1:
+                        logger.info(f"   → DEBUG: First FCF value: ${fcf:,.0f} (verify this is in dollars, not millions)")
                 
                 # If not enough history, project forward
                 if len(fcff_forecast) < 5:
@@ -428,6 +437,33 @@ class ComprehensiveOrchestrator:
                     debt=float(balance_sheet.get('totalDebt', 0))
                 )
                 logger.success(f"   ✅ DCF: ${dcf_result.value_per_share:.2f}/share (WACC: {dcf_result.wacc:.2%})")
+
+                # ACTIVATION: Monte Carlo Simulation for uncertainty quantification
+                if run_dcf and dcf_result:
+                    logger.info("   → Running Monte Carlo uncertainty analysis...")
+                    try:
+                        mc_results = self.modeling.dcf_engine.monte_carlo_simulation(
+                            fcff_forecast=fcff_forecast,
+                            wacc_inputs=wacc_inputs,
+                            terminal_inputs=terminal_inputs,
+                            shares_outstanding=float(shares_out),
+                            cash=float(balance_sheet.get('cashAndCashEquivalents', 0)),
+                            debt=float(balance_sheet.get('totalDebt', 0)),
+                            simulations=10000,
+                            random_seed=42  # For reproducibility
+                        )
+                        
+                        # Store Monte Carlo results with DCF
+                        if not hasattr(dcf_result, 'monte_carlo'):
+                            dcf_result.monte_carlo = mc_results
+                        
+                        logger.success(f"   ✅ Monte Carlo: Mean=${mc_results['mean']:.2f}, "
+                                      f"P10-P90: ${mc_results['p10']:.2f}-${mc_results['p90']:.2f}, "
+                                      f"Simulations: {mc_results['simulations']:,}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠ Monte Carlo simulation failed: {e}")
+                        import traceback
+                        logger.debug(traceback.format_exc())
             except Exception as e:
                 logger.warning(f"   ⚠ DCF failed: {e}")
         
@@ -557,6 +593,25 @@ class ComprehensiveOrchestrator:
                     lbo_inputs=lbo_inputs
                 )
                 logger.success(f"   ✅ LBO: IRR={lbo_result.equity_irr:.1%}, MoIC={lbo_result.equity_moic:.2f}x")
+
+                # ACTIVATION: LBO Sensitivity Analysis
+                if run_lbo and lbo_result:
+                    logger.info("   → Running LBO sensitivity analysis...")
+                    try:
+                        lbo_sensitivity = self.lbo_engine.sensitivity_analysis(
+                            base_inputs=lbo_inputs,
+                            exit_multiple_range=(8.0, 14.0),  # 8x to 14x exit multiples
+                            ebitda_range=(0.85, 1.15),  # 85% to 115% of base EBITDA
+                            steps=5
+                        )
+                        
+                        # Store sensitivity with LBO result
+                        if not hasattr(lbo_result, 'sensitivity'):
+                            lbo_result.sensitivity = lbo_sensitivity
+                        
+                        logger.success(f"   ✅ LBO Sensitivity: Exit multiples 8x-14x analyzed")
+                    except Exception as e:
+                        logger.warning(f"   ⚠ LBO sensitivity failed: {e}")
             except Exception as e:
                 logger.warning(f"   ⚠ LBO failed: {e}")
         
@@ -642,6 +697,25 @@ class ComprehensiveOrchestrator:
                     )
                     
                     logger.success(f"   ✅ Merger: {merger_result.accretion_dilution_pct:+.1%} EPS impact ({'ACCRETIVE' if merger_result.is_accretive else 'DILUTIVE'})")
+
+                    # ACTIVATION: Merger Sensitivity Analysis
+                    if run_merger and merger_result:
+                        logger.info("   → Running merger sensitivity analysis...")
+                        try:
+                            merger_sensitivity = merger_model.sensitivity_analysis(
+                                base_inputs=merger_inputs,
+                                premium_range=(0.20, 0.40),  # 20% to 40% premium
+                                stock_consideration_range=(0.0, 1.0),  # 0% to 100% stock
+                                steps=5
+                            )
+                            
+                            # Store sensitivity with merger result
+                            if not hasattr(merger_result, 'sensitivity'):
+                                merger_result.sensitivity = merger_sensitivity
+                            
+                            logger.success(f"   ✅ Merger Sensitivity: Premium 20%-40%, Stock 0%-100% analyzed")
+                        except Exception as e:
+                            logger.warning(f"   ⚠ Merger sensitivity failed: {e}")
                 else:
                     logger.warning("   ⚠ No peers available for merger analysis")
             except Exception as e:
@@ -1092,6 +1166,39 @@ class ComprehensiveOrchestrator:
             
             # Store comprehensive results
             success = self.modeling.memory.store_analysis(comprehensive_memory)
+
+            # ACTIVATION: Store individual DD risk cards for granular AI queries
+            if result.due_diligence:
+                logger.info("   → Storing individual DD risk cards for AI queries...")
+                risk_count = 0
+                
+                for category, risks in result.due_diligence.items():
+                    for risk in risks:
+                        # Store each risk card individually in memory
+                        self.modeling.memory.store_context(
+                            context_type='dd_risk_card',
+                            data={
+                                'severity': risk.severity,
+                                'title': risk.title,
+                                'description': risk.description,
+                                'category': risk.category,
+                                'subcategory': risk.subcategory,
+                                'mitigation': risk.mitigation,
+                                'probability': getattr(risk, 'probability', None),
+                                'impact': getattr(risk, 'impact', None)
+                            },
+                            metadata={
+                                'ticker': result.symbol,
+                                'category': category,
+                                'severity': risk.severity,
+                                'subcategory': risk.subcategory,
+                                'session_id': comprehensive_memory.session_id
+                            }
+                        )
+                        risk_count += 1
+                
+                logger.success(f"   ✓ Stored {risk_count} individual risk cards for AI retrieval")
+                logger.info(f"   ✓ AI can now query by: ticker, category, severity, subcategory")
             
             if success:
                 logger.success("   ✓ FULL comprehensive results stored in MemoryManager")

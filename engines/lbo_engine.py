@@ -279,13 +279,13 @@ class LBOEngine:
     
     def build_sources_and_uses(self, inputs: LBOInputs) -> pd.DataFrame:
         """
-        Build sources & uses of funds table
+        Build sources & uses of funds table - FIXED TO BALANCE
         
         Args:
             inputs: LBO model inputs
             
         Returns:
-            DataFrame with sources and uses
+            DataFrame with balanced sources and uses
         """
         # USES
         purchase_ev = inputs.purchase_enterprise_value
@@ -299,16 +299,34 @@ class LBOEngine:
             'Total Uses': total_uses
         }
         
-        # SOURCES
-        equity = inputs.equity_contribution + inputs.rollover_equity
-        total_debt = sum(t.amount for t in inputs.debt_tranches)
-        financing_fees = total_debt * inputs.financing_fees
+        # SOURCES - FIX: Ensure sources equal uses including all fees
+        # Get debt amounts before financing fees
+        total_debt_gross = sum(t.amount for t in inputs.debt_tranches)
+        financing_fees = total_debt_gross * inputs.financing_fees
         
-        # Adjust for financing fees
-        net_debt_proceeds = total_debt - financing_fees
+        # Calculate required equity to balance
+        # Total Sources must equal Total Uses
+        # Sources = Equity + (Debt - Financing Fees)
+        # Therefore: Equity = Total Uses - (Debt - Financing Fees)
+        net_debt_proceeds = total_debt_gross - financing_fees
+        required_equity = total_uses - net_debt_proceeds
+        
+        # Use actual equity inputs, but show any discrepancy
+        actual_equity = inputs.equity_contribution + inputs.rollover_equity
+        
+        # FIX: Adjust equity to balance (in real LBO, you'd adjust debt or equity)
+        if not np.isclose(actual_equity, required_equity, rtol=0.01):
+            logger.warning(f"LBO Sources/Uses imbalance: Required equity ${required_equity:,.0f} vs "
+                          f"Provided ${actual_equity:,.0f}. Adjusting sponsor equity to balance.")
+            # Adjust sponsor equity to make it balance
+            adj_sponsor = required_equity - inputs.rollover_equity
+            equity = required_equity
+        else:
+            adj_sponsor = inputs.equity_contribution
+            equity = actual_equity
         
         sources = {
-            'Sponsor Equity': inputs.equity_contribution,
+            'Sponsor Equity': adj_sponsor,
             'Rollover Equity': inputs.rollover_equity,
             'Total Equity': equity
         }
@@ -318,19 +336,23 @@ class LBOEngine:
             sources[f'Debt - {tranche.name}'] = tranche.amount
         
         sources.update({
-            'Total Debt': total_debt,
+            'Total Debt': total_debt_gross,
             'Less: Financing Fees': -financing_fees,
             'Net Debt Proceeds': net_debt_proceeds,
             'Total Sources': equity + net_debt_proceeds
         })
+        
+        # Verify balance
+        if not np.isclose(total_uses, equity + net_debt_proceeds, rtol=0.001):
+            logger.error(f"LBO STILL UNBALANCED: Uses=${total_uses:,.0f}, Sources=${equity + net_debt_proceeds:,.0f}")
+        else:
+            logger.info(f"✓ LBO Sources & Uses balance: ${total_uses:,.0f}")
         
         # Create DataFrame
         df = pd.DataFrame({
             'Uses': pd.Series(uses),
             'Sources': pd.Series(sources)
         })
-        
-        logger.debug(f"Total Uses: ${total_uses:,.0f}, Total Sources: ${equity + net_debt_proceeds:,.0f}")
         
         return df
     

@@ -194,6 +194,78 @@ class ModelingAgent:
         logger.info(f"Scenarios Complete - {len(scenarios)} cases analyzed")
         return scenarios
     
+    def detect_growth_stage(
+        self,
+        revenue: float,
+        revenue_growth: float,
+        fcf: float,
+        ebitda_margin: float
+    ) -> tuple:
+        """
+        Detect company growth stage and determine valuation strategy
+        
+        Returns:
+            (GrowthStage, strategy_dict with weights and guidance)
+        """
+        fcf_margin = fcf / revenue if revenue > 0 else -1
+        
+        if revenue_growth > 0.40 and fcf_margin < 0:
+            stage = "HYPERGROWTH"
+            strategy = {
+                'dcf_weight': 0.10,  # Low - unreliable with negative FCF
+                'cca_weight': 0.80,  # Primary - revenue multiples
+                'scenarios_weight': 0.10,
+                'primary_method': 'CCA Revenue Multiple',
+                'guidance': 'Hypergrowth company - trust revenue multiples over DCF',
+                'dcf_note': 'DCF less reliable due to negative/volatile cash flows',
+                'cca_note': 'Revenue multiples primary valuation method',
+                'trust_levels': {'DCF': 'LOW', 'CCA': 'HIGH', 'Scenarios': 'MEDIUM'}
+            }
+        elif revenue_growth >= 0.20 and fcf_margin >= 0:
+            stage = "GROWTH"
+            strategy = {
+                'dcf_weight': 0.30,  # Secondary - volatility
+                'cca_weight': 0.60,  # Primary - growth-adjusted
+                'scenarios_weight': 0.10,
+                'primary_method': 'Growth-Adjusted CCA',
+                'guidance': 'High-growth company - blend CCA (60%) and DCF (30%)',
+                'dcf_note': 'Use DCF with conservative terminal assumptions',
+                'cca_note': 'Apply growth/ROIC regression adjustments',
+                'trust_levels': {'DCF': 'MEDIUM', 'CCA': 'HIGH', 'Scenarios': 'MEDIUM'}
+            }
+        elif revenue_growth >= 0.05:
+            stage = "MATURE"
+            strategy = {
+                'dcf_weight': 0.60,  # Primary - reliable FCF
+                'cca_weight': 0.30,  # Validation
+                'lbo_weight': 0.10,  # Floor value
+                'primary_method': 'Discounted Cash Flow',
+                'guidance': 'Mature company - DCF primary with CCA validation',
+                'dcf_note': 'Primary valuation method - stable cash flows',
+                'cca_note': 'Use for peer validation',
+                'trust_levels': {'DCF': 'HIGH', 'CCA': 'MEDIUM', 'LBO': 'LOW'}
+            }
+        else:
+            stage = "DECLINE"
+            strategy = {
+                'dcf_weight': 0.0,  # Not applicable
+                'cca_weight': 0.50,  # Distressed discount
+                'liquidation_weight': 0.50,
+                'primary_method': 'Distressed Valuation',
+                'guidance': 'Declining/distressed - use liquidation + distressed multiples',
+                'dcf_note': 'DCF not applicable - going concern questionable',
+                'cca_note': 'Apply 40-50% discount to peer multiples',
+                'trust_levels': {'DCF': 'NONE', 'CCA': 'MEDIUM', 'Liquidation': 'HIGH'}
+            }
+        
+        logger.info(f"Growth Stage Detected: {stage}")
+        logger.info(f"  Primary Method: {strategy['primary_method']}")
+        logger.info(f"  Weighting: DCF={strategy.get('dcf_weight', 0):.0%}, "
+                   f"CCA={strategy.get('cca_weight', 0):.0%}")
+        
+        return stage, strategy
+    
+
     def build_valuation_package(
         self,
         symbol: str,
@@ -367,7 +439,8 @@ Format as concise executive summary (3-4 paragraphs)."""
         package: ValuationPackage
     ) -> bool:
         """
-        Store valuation package in MemoryManager (DuckDB)
+        Store valuation package in MemoryManager (DuckDB + ChromaDB)
+        NOW INCLUDES: Monte Carlo, LBO Sensitivity, Merger Sensitivity
         
         Args:
             package: ValuationPackage to store
@@ -376,7 +449,7 @@ Format as concise executive summary (3-4 paragraphs)."""
             Success status
         """
         try:
-            # Prepare results dictionary
+            # Prepare results dictionary with NEW activated features
             results = {
                 'valuation_range': {
                     'low': package.valuation_range[0] if package.valuation_range else None,
@@ -386,7 +459,15 @@ Format as concise executive summary (3-4 paragraphs)."""
                 'dcf': {
                     'value_per_share': package.dcf_result.value_per_share if package.dcf_result else None,
                     'wacc': package.dcf_result.wacc if package.dcf_result else None,
-                    'enterprise_value': package.dcf_result.enterprise_value if package.dcf_result else None
+                    'enterprise_value': package.dcf_result.enterprise_value if package.dcf_result else None,
+                    # ACTIVATION: Monte Carlo uncertainty results
+                    'monte_carlo': {
+                        'mean': package.dcf_result.monte_carlo.get('mean') if hasattr(package.dcf_result, 'monte_carlo') else None,
+                        'median': package.dcf_result.monte_carlo.get('median') if hasattr(package.dcf_result, 'monte_carlo') else None,
+                        'p10': package.dcf_result.monte_carlo.get('p10') if hasattr(package.dcf_result, 'monte_carlo') else None,
+                        'p90': package.dcf_result.monte_carlo.get('p90') if hasattr(package.dcf_result, 'monte_carlo') else None,
+                        'std': package.dcf_result.monte_carlo.get('std') if hasattr(package.dcf_result, 'monte_carlo') else None
+                    } if package.dcf_result and hasattr(package.dcf_result, 'monte_carlo') else None
                 } if package.dcf_result else None,
                 'cca': {
                     'value_per_share_ebitda': package.cca_result.value_per_share_ebitda if package.cca_result else None,
@@ -395,8 +476,16 @@ Format as concise executive summary (3-4 paragraphs)."""
                 } if package.cca_result else None,
                 'lbo': {
                     'equity_irr': package.lbo_result.equity_irr if package.lbo_result else None,
-                    'equity_moic': package.lbo_result.equity_moic if package.lbo_result else None
+                    'equity_moic': package.lbo_result.equity_moic if package.lbo_result else None,
+                    # ACTIVATION: LBO sensitivity available
+                    'has_sensitivity': hasattr(package.lbo_result, 'sensitivity') if package.lbo_result else False
                 } if package.lbo_result else None,
+                'merger': {
+                    'accretion_dilution_pct': package.merger_result.accretion_dilution_pct if package.merger_result and hasattr(package.merger_result, 'accretion_dilution_pct') else None,
+                    'is_accretive': package.merger_result.is_accretive if package.merger_result and hasattr(package.merger_result, 'is_accretive') else None,
+                    # ACTIVATION: Merger sensitivity available
+                    'has_sensitivity': hasattr(package.merger_result, 'sensitivity') if package.merger_result else False
+                } if package.merger_result else None,
                 'key_drivers': package.key_drivers,
                 'risk_factors': package.risk_factors,
                 'llm_summary': package.llm_summary

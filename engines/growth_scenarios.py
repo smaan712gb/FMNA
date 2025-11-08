@@ -551,7 +551,7 @@ class GrowthScenariosEngine:
         """
         scenarios = {}
         
-        # Bull case
+        # Bull case - FIX: Higher growth, higher margins, LOWER working capital drag
         bull_inputs = GrowthScenarioInputs(
             company_name=inputs.company_name,
             industry=inputs.industry,
@@ -566,11 +566,14 @@ class GrowthScenariosEngine:
             total_debt=inputs.total_debt,
             cash=inputs.cash,
             working_capital=inputs.working_capital,
+            retained_earnings=inputs.retained_earnings,
+            market_value_equity=inputs.market_value_equity,
+            book_value_liabilities=inputs.book_value_liabilities,
             years=inputs.years,
             growth_trajectory=[g * 1.3 for g in (inputs.growth_trajectory or [0.2] * inputs.years)],
             margin_trajectory=[m * 1.2 for m in (inputs.margin_trajectory or [0.15] * inputs.years)],
             capex_pct_revenue=inputs.capex_pct_revenue * 0.8,
-            nwc_pct_revenue=inputs.nwc_pct_revenue,
+            nwc_pct_revenue=inputs.nwc_pct_revenue * 0.7,  # FIX: Lower WC drag in Bull case
             tax_rate=inputs.tax_rate
         )
         scenarios['Bull'] = self.project_growth_scenario(bull_inputs, "Bull")
@@ -578,7 +581,7 @@ class GrowthScenariosEngine:
         # Base case
         scenarios['Base'] = self.project_growth_scenario(inputs, "Base")
         
-        # Bear case
+        # Bear case - FIX: Lower growth, lower margins, HIGHER working capital drag
         bear_inputs = GrowthScenarioInputs(
             company_name=inputs.company_name,
             industry=inputs.industry,
@@ -593,11 +596,14 @@ class GrowthScenariosEngine:
             total_debt=inputs.total_debt,
             cash=inputs.cash,
             working_capital=inputs.working_capital,
+            retained_earnings=inputs.retained_earnings,
+            market_value_equity=inputs.market_value_equity,
+            book_value_liabilities=inputs.book_value_liabilities,
             years=inputs.years,
             growth_trajectory=[g * 0.5 for g in (inputs.growth_trajectory or [0.2] * inputs.years)],
             margin_trajectory=[m * 0.8 for m in (inputs.margin_trajectory or [0.15] * inputs.years)],
-            capex_pct_revenue=inputs.capex_pct_revenue,
-            nwc_pct_revenue=inputs.nwc_pct_revenue,
+            capex_pct_revenue=inputs.capex_pct_revenue * 1.2,  # FIX: Higher capex in Bear case
+            nwc_pct_revenue=inputs.nwc_pct_revenue * 1.3,  # FIX: Higher WC drag in Bear case
             tax_rate=inputs.tax_rate
         )
         scenarios['Bear'] = self.project_growth_scenario(bear_inputs, "Bear")

@@ -815,8 +815,8 @@ def show_analysis_page():
         dcf_analysis = st.checkbox("DCF Valuation", value=True)
         cca_analysis = st.checkbox("Comparable Companies Analysis", value=True)
         three_statement = st.checkbox("3-Statement Model", value=True, help="Integrated Income Statement, Balance Sheet, and Cash Flow forecast")
-        lbo_analysis = st.checkbox("LBO Analysis", value=False)
-        merger_analysis = st.checkbox("M&A / Merger Model", value=False)
+        lbo_analysis = st.checkbox("LBO Analysis", value=True)
+        merger_analysis = st.checkbox("M&A / Merger Model", value=True)
         growth_scenarios = st.checkbox("Growth Scenarios & Distress Analysis", value=True, help="Includes Altman Z-Score, O-Score, bankruptcy probability, coverage ratios, liquidity runway")
         
         # If merger analysis selected, ask for acquirer
@@ -898,10 +898,10 @@ def show_analysis_page():
             return
         
         # Prepare analysis options
+        # Note: AI Valuation runs automatically in Step 2 of comprehensive analysis
         analysis_options = {
             'period': 'annual',
             'peers_count': peer_count,
-            'ai_valuation': ai_valuation,  # AI Valuation Engine
             'dcf': dcf_analysis,
             'cca': cca_analysis,
             'three_statement': three_statement,

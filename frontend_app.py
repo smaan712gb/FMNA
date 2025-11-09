@@ -804,6 +804,14 @@ def show_analysis_page():
     
     with col1:
         st.markdown("**Valuation Methods**")
+        
+        # AI Valuation - PROMINENTLY FEATURED FIRST
+        ai_valuation = st.checkbox(
+            "🤖 AI-Powered Valuation Engine", 
+            value=True,
+            help="DeepSeek AI automatically classifies company type, development stage, and intelligently weights DCF/CCA/LBO methodologies based on company characteristics"
+        )
+        
         dcf_analysis = st.checkbox("DCF Valuation", value=True)
         cca_analysis = st.checkbox("Comparable Companies Analysis", value=True)
         three_statement = st.checkbox("3-Statement Model", value=True, help="Integrated Income Statement, Balance Sheet, and Cash Flow forecast")
@@ -893,6 +901,7 @@ def show_analysis_page():
         analysis_options = {
             'period': 'annual',
             'peers_count': peer_count,
+            'ai_valuation': ai_valuation,  # AI Valuation Engine
             'dcf': dcf_analysis,
             'cca': cca_analysis,
             'three_statement': three_statement,

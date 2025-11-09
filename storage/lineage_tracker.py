@@ -11,7 +11,6 @@ from loguru import logger
 
 from config.schemas import ModelLineage
 from storage.duckdb_adapter import DuckDBAdapter
-from storage.cognee_adapter import CogneeAdapter
 
 
 class LineageTracker:
@@ -29,7 +28,6 @@ class LineageTracker:
     def __init__(self):
         """Initialize lineage tracker"""
         self.db = DuckDBAdapter()
-        self.cognee = CogneeAdapter()
         
         # Initialize lineage table in DuckDB
         self._init_lineage_table()
@@ -166,7 +164,7 @@ class LineageTracker:
         version: str
     ) -> Dict[str, Any]:
         """
-        Create provenance graph in Cognee
+        Create provenance graph (Cognee removed - stored in DuckDB only)
         
         Args:
             dataset_name: Dataset name
@@ -175,8 +173,8 @@ class LineageTracker:
         Returns:
             Graph structure
         """
-        if not self.cognee.enabled:
-            return {}
+        logger.info(f"Lineage stored in DuckDB for {dataset_name} v{version}")
+        return {'nodes': 0, 'edges': 0}
         
         # Get lineage record
         query = """

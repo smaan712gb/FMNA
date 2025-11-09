@@ -441,11 +441,13 @@ class ComprehensiveOrchestrator:
         cash_flow = financial_data.get('cash_flow', [])[0] if financial_data.get('cash_flow') else {}
         market_snapshot = financial_data.get('market_snapshot', {})
         
-        # Initialize results
+        # Initialize ALL results upfront to avoid reference errors
         dcf_result = None
         cca_result = None
         lbo_result = None
         growth_result = None
+        three_statement_result = None  # FIX: Initialize before use
+        merger_result = None
         
         # Run DCF if requested
         if run_dcf:
@@ -1206,26 +1208,42 @@ class ComprehensiveOrchestrator:
                 } if filing_data else {}
             }
             
-            # Store SEC filing excerpts in Cognee for semantic search
+            # Store SEC filing excerpts in MemoryManager for semantic search (via ChromaDB)
             if filing_data and filing_data.get('10k'):
                 try:
                     # Store risk factors excerpt
                     risk_factors = filing_data['10k'].get('risk_factors', '')
                     if risk_factors and len(risk_factors) > 100:
-                        await self.modeling.memory.cognee.cognify(
-                            f"SEC 10-K Risk Factors for {result.symbol}: {risk_factors[:5000]}"
+                        self.modeling.memory.store_context(
+                            context_type='sec_filing_risk_factors',
+                            data=risk_factors[:5000],
+                            metadata={
+                                'ticker': result.symbol,
+                                'filing_type': '10k',
+                                'filing_date': str(filing_data['10k'].get('filing_date')),
+                                'section': 'risk_factors',
+                                'session_id': f"comprehensive_{result.symbol}_{result.timestamp.strftime('%Y%m%d_%H%M%S')}"
+                            }
                         )
                     
                     # Store MD&A excerpt
                     mda = filing_data['10k'].get('mda', '')
                     if mda and len(mda) > 100:
-                        await self.modeling.memory.cognee.cognify(
-                            f"SEC 10-K MD&A for {result.symbol}: {mda[:5000]}"
+                        self.modeling.memory.store_context(
+                            context_type='sec_filing_mda',
+                            data=mda[:5000],
+                            metadata={
+                                'ticker': result.symbol,
+                                'filing_type': '10k',
+                                'filing_date': str(filing_data['10k'].get('filing_date')),
+                                'section': 'mda',
+                                'session_id': f"comprehensive_{result.symbol}_{result.timestamp.strftime('%Y%m%d_%H%M%S')}"
+                            }
                         )
                     
-                    logger.success("   ✓ SEC filing excerpts stored in Cognee knowledge graph")
+                    logger.success("   ✓ SEC filing excerpts stored in MemoryManager (ChromaDB for semantic search)")
                 except Exception as e:
-                    logger.warning(f"   ⚠ Cognee storage of filings failed: {e}")
+                    logger.warning(f"   ⚠ SEC filing storage failed: {e}")
             
             # Create comprehensive AnalysisMemory object
             comprehensive_memory = AnalysisMemory(

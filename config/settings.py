@@ -89,7 +89,8 @@ class Settings(BaseSettings):
     mongo_uri: str = Field(default="mongodb://localhost:27017/fmna", description="MongoDB URI")
     
     # Cognee Configuration (open-source, no API key needed)
-    cognee_enabled: bool = Field(default=True, description="Enable Cognee knowledge graph")
+    # NOTE: Platform uses DuckDB + Redis + ChromaDB for memory instead
+    cognee_enabled: bool = Field(default=False, description="Enable Cognee knowledge graph (currently unused)")
     
     # Application Settings
     environment: str = Field(default="development", description="Environment: development, staging, production")

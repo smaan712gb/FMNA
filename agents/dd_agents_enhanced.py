@@ -10,7 +10,6 @@ from loguru import logger
 
 from config.schemas import RiskCard
 from storage.duckdb_adapter import DuckDBAdapter
-from storage.cognee_adapter import CogneeAdapter
 from utils.llm_client import LLMClient
 
 
@@ -575,8 +574,6 @@ class EnhancedDDAgentsSuite:
         self.esg = EnhancedESGAgent()
         self.hr = EnhancedHRDDAgent()
         
-        self.cognee = CogneeAdapter()
-        
         logger.info("Enhanced DD Agents Suite initialized - 6 agents ready")
     
     async def run_full_dd(
@@ -644,14 +641,10 @@ class EnhancedDDAgentsSuite:
         )
         logger.info(f"  ✓ HR DD: {len(results['hr'])} risks")
         
-        # Store in Cognee
+        # Calculate total risks
         all_risks = []
         for category, risks in results.items():
             all_risks.extend(risks)
-        
-        if all_risks and self.cognee.enabled:
-            summary = f"DD Analysis for {symbol}: {len(all_risks)} risks across 6 categories"
-            await self.cognee.cognify(summary)
         
         logger.success(f"Enhanced DD complete - {len(all_risks)} total risk cards across ALL 6 categories")
         

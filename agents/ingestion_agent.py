@@ -1,7 +1,7 @@
 """
 Ingestion Agent
 Orchestrates data collection from FMP API and SEC EDGAR, 
-stores in DuckDB lakehouse and Cognee knowledge graph
+stores in DuckDB lakehouse via MemoryManager
 """
 
 from typing import Dict, List, Optional, Any, Tuple
@@ -18,7 +18,7 @@ from config.schemas import (
 from ingestion.fmp_client import FMPClient
 from ingestion.sec_client import SECClient
 from storage.duckdb_adapter import DuckDBAdapter
-from storage.cognee_adapter import CogneeAdapter
+from storage.memory_manager import MemoryManager
 from utils.llm_client import LLMClient
 
 
@@ -42,10 +42,10 @@ class IngestionAgent:
         self.fmp = FMPClient()
         self.sec = SECClient(email="fmna@agent.local")
         self.db = DuckDBAdapter()
-        self.cognee = CogneeAdapter()
+        self.memory = MemoryManager()
         self.llm = LLMClient()
         
-        logger.info("Ingestion Agent initialized")
+        logger.info("Ingestion Agent initialized with MemoryManager")
     
     def detect_financial_scale(self, financial_data: Dict[str, Any]) -> Tuple[float, str]:
         """
@@ -154,8 +154,6 @@ class IngestionAgent:
             'financials_count': 0,
             'market_data_count': 0,
             'filings_count': 0,
-            'cognee_nodes': 0,
-            'cognee_edges': 0,
             'errors': []
         }
         
@@ -186,12 +184,6 @@ class IngestionAgent:
                 filings_count = self.ingest_filings(symbol)
                 results['filings_count'] = filings_count
                 logger.info(f"✓ Filings ingested: {filings_count} filings")
-            
-            # Step 5: Build Cognee knowledge graph
-            cognee_results = asyncio.run(self.build_knowledge_graph(symbol, company))
-            results['cognee_nodes'] = cognee_results.get('nodes', 0)
-            results['cognee_edges'] = cognee_results.get('edges', 0)
-            logger.info(f"✓ Knowledge graph built: {results['cognee_nodes']} nodes, {results['cognee_edges']} edges")
             
             logger.success(f"Full ingestion completed for {symbol}")
             
@@ -461,68 +453,6 @@ class IngestionAgent:
             logger.error(f"Error ingesting filings: {str(e)}")
             return 0
     
-    async def build_knowledge_graph(
-        self,
-        symbol: str,
-        company: Optional[CompanyMaster] = None
-    ) -> Dict[str, int]:
-        """
-        Build Cognee knowledge graph for company
-        
-        Args:
-            symbol: Stock ticker symbol
-            company: Company master record
-            
-        Returns:
-            Dictionary with counts of nodes and edges created
-        """
-        if not self.cognee.enabled:
-            logger.warning("Cognee is disabled, skipping knowledge graph")
-            return {'nodes': 0, 'edges': 0}
-        
-        try:
-            nodes_created = 0
-            edges_created = 0
-            
-            # Create company node
-            if company:
-                await self.cognee.store_company(
-                    symbol=symbol,
-                    company_data={
-                        'legal_name': company.legal_name,
-                        'cik': company.cik,
-                        'sector': company.sector,
-                        'industry': company.industry,
-                        'currency': company.currency.value if hasattr(company.currency, 'value') else company.currency
-                    }
-                )
-                nodes_created += 1
-            
-            # Get recent financials and create summary
-            financials_df = self.db.get_financials(
-                symbol=symbol,
-                metrics=['revenue', 'ebitda', 'net_income'],
-                frequency='annual'
-            )
-            
-            if not financials_df.empty:
-                # Create summary text for Cognee
-                summary = f"{company.legal_name if company else symbol} financial summary:\n"
-                for _, row in financials_df.head(3).iterrows():
-                    summary += f"{row['period_end']}: {row['metric']} = ${row['value']:,.0f}\n"
-                
-                # Add to Cognee with cognify
-                await self.cognee.cognify(summary)
-                nodes_created += 1
-            
-            return {
-                'nodes': nodes_created,
-                'edges': edges_created
-            }
-            
-        except Exception as e:
-            logger.error(f"Error building knowledge graph: {str(e)}")
-            return {'nodes': 0, 'edges': 0}
     
     def close(self):
         """Clean up resources"""
@@ -554,7 +484,6 @@ if __name__ == "__main__":
     print(f"Financials: {results['financials_count']} facts")
     print(f"Market Data: {results['market_data_count']} records")
     print(f"Filings: {results['filings_count']} filings")
-    print(f"Knowledge Graph: {results['cognee_nodes']} nodes, {results['cognee_edges']} edges")
     
     if results['errors']:
         print(f"\nErrors: {len(results['errors'])}")

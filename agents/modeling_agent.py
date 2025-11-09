@@ -19,7 +19,6 @@ from engines import (
     GrowthScenariosEngine, GrowthScenarioInputs, GrowthStage, Industry
 )
 from storage.duckdb_adapter import DuckDBAdapter
-from storage.cognee_adapter import CogneeAdapter
 from storage.memory_manager import MemoryManager, AnalysisMemory
 from utils.llm_client import LLMClient
 
@@ -76,7 +75,6 @@ class ModelingAgent:
         self.growth_engine = GrowthScenariosEngine()
         
         self.db = DuckDBAdapter()
-        self.cognee = CogneeAdapter()
         self.memory = MemoryManager()
         self.llm = LLMClient()
         
@@ -406,8 +404,11 @@ Format as concise executive summary (3-4 paragraphs)."""
         if dcf_result:
             if dcf_result.wacc < 0.08:
                 drivers.append("Low WACC (favorable cost of capital)")
-            if dcf_result.pv_terminal_value / dcf_result.enterprise_value > 0.7:
+            # Check for zero enterprise_value before dividing
+            if dcf_result.enterprise_value > 0 and dcf_result.pv_terminal_value / dcf_result.enterprise_value > 0.7:
                 drivers.append("Terminal value represents >70% of value")
+            elif dcf_result.enterprise_value == 0:
+                drivers.append("DCF valuation requires review (enterprise value is zero)")
         
         if cca_result:
             if cca_result.peer_count >= 5:

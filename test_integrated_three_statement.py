@@ -4,7 +4,7 @@ Demonstrates historical + forecast modeling capability
 """
 
 from engines.three_statement_model import (
-    ThreeStatementModel,
+    IntegratedThreeStatementModel,
     HistoricalData,
     DriverInputs
 )
@@ -71,7 +71,7 @@ def test_integrated_model():
     )
     
     # 3. Build the integrated model
-    model = ThreeStatementModel()
+    model = IntegratedThreeStatementModel()
     result = model.build_integrated_model(
         historical=historical,
         drivers=drivers,
@@ -210,12 +210,11 @@ def test_forecast_only_model():
         mandatory_debt_payment=10_000_000
     )
     
-    model = ThreeStatementModel()
-    result = model.build_three_statement_model(
+    model = IntegratedThreeStatementModel()
+    result = model.build_integrated_model(
+        historical=historical,
         drivers=drivers,
-        base_revenue=1_000_000_000,
-        base_debt=300_000_000,
-        years=5
+        forecast_years=5
     )
     
     logger.info(f"✓ Forecast periods: {', '.join(result.forecast_periods)}")

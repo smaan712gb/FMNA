@@ -286,7 +286,7 @@ class AssuranceAgent:
 
 # Example usage
 if __name__ == "__main__":
-    from engines.three_statement_model import ThreeStatementModel, DriverInputs
+    from engines.three_statement_model import IntegratedThreeStatementModel, DriverInputs
     
     # Initialize agent
     agent = AssuranceAgent()
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     print("="*70)
     
     # Build sample 3-statement model
-    model = ThreeStatementModel()
+    model = IntegratedThreeStatementModel()
     drivers = DriverInputs(
         base_revenue=1_000_000_000,
         revenue_growth_rates=[0.00, 0.10, 0.12, 0.10, 0.08],

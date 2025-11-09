@@ -15,7 +15,10 @@ from engines.growth_scenarios import (
     SaaSMetrics,
     DistressMetrics
 )
-from engines.three_statement_model import ThreeStatementModel, DriverInputs, ThreeStatementResult
+from engines.three_statement_model import IntegratedThreeStatementModel, DriverInputs, ThreeStatementResult
+
+# Alias for compatibility
+ThreeStatementModel = IntegratedThreeStatementModel
 
 __all__ = [
     # DCF

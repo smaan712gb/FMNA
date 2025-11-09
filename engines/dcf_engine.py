@@ -82,34 +82,36 @@ class DCFEngine:
         Returns:
             Tuple of (WACC, cost_of_equity, levered_beta)
         """
+        # CRITICAL FIX: Convert all inputs to float to avoid Decimal/float type errors
+        unlevered_beta = float(inputs.unlevered_beta)
+        tax_rate = float(inputs.tax_rate)
+        target_de = float(inputs.target_debt_to_equity)
+        rf_rate = float(inputs.risk_free_rate)
+        erp = float(inputs.equity_risk_premium)
+        cost_debt = float(inputs.cost_of_debt)
+        market_cap = float(inputs.market_cap)
+        net_debt = float(inputs.net_debt)
+        
         # Step 1: Relever beta to target capital structure
-        levered_beta = inputs.unlevered_beta * (
-            1 + (1 - inputs.tax_rate) * inputs.target_debt_to_equity
-        )
+        levered_beta = unlevered_beta * (1 + (1 - tax_rate) * target_de)
         
         # Step 2: Calculate cost of equity (CAPM)
-        cost_of_equity = (
-            inputs.risk_free_rate + 
-            levered_beta * inputs.equity_risk_premium
-        )
+        cost_of_equity = rf_rate + levered_beta * erp
         
         # Step 3: After-tax cost of debt
-        cost_of_debt_after_tax = inputs.cost_of_debt * (1 - inputs.tax_rate)
+        cost_of_debt_after_tax = cost_debt * (1 - tax_rate)
         
         # Step 4: Calculate weights
-        total_value = inputs.market_cap + inputs.net_debt
-        weight_equity = inputs.market_cap / total_value
-        weight_debt = inputs.net_debt / total_value
+        total_value = market_cap + net_debt
+        weight_equity = market_cap / total_value if total_value != 0 else 1.0
+        weight_debt = net_debt / total_value if total_value != 0 else 0.0
         
         # Step 5: Calculate WACC
-        wacc = (
-            weight_equity * cost_of_equity + 
-            weight_debt * cost_of_debt_after_tax
-        )
+        wacc = weight_equity * cost_of_equity + weight_debt * cost_of_debt_after_tax
         
         logger.debug(f"WACC: {wacc:.2%}, CoE: {cost_of_equity:.2%}, Levered Beta: {levered_beta:.2f}")
         
-        return wacc, cost_of_equity, levered_beta
+        return float(wacc), float(cost_of_equity), float(levered_beta)
     
     def calculate_terminal_value(
         self,
@@ -274,21 +276,26 @@ class DCFEngine:
         logger.info(f"Equity Value: ${equity_value:,.0f}")
         logger.info(f"Value per Share: ${value_per_share:.2f}")
         
-        # Prepare result
+        # Prepare result - ENSURE ALL FLOATS
+        total_value = float(wacc_inputs.market_cap) + float(wacc_inputs.net_debt)
+        weight_equity = float(wacc_inputs.market_cap) / total_value if total_value != 0 else 1.0
+        weight_debt = float(wacc_inputs.net_debt) / total_value if total_value != 0 else 0.0
+        cost_of_debt_after_tax = float(wacc_inputs.cost_of_debt) * (1 - float(wacc_inputs.tax_rate))
+        
         result = DCFResult(
-            enterprise_value=enterprise_value,
-            equity_value=equity_value,
-            value_per_share=value_per_share,
-            shares_outstanding=shares_outstanding,
-            pv_forecast_period=pv_forecast,
-            terminal_value=terminal_value,
-            pv_terminal_value=pv_terminal_value,
-            wacc=wacc,
-            cost_of_equity=cost_of_equity,
-            levered_beta=levered_beta,
-            cost_of_debt_after_tax=wacc_inputs.cost_of_debt * (1 - wacc_inputs.tax_rate),
-            weight_equity=wacc_inputs.market_cap / (wacc_inputs.market_cap + wacc_inputs.net_debt),
-            weight_debt=wacc_inputs.net_debt / (wacc_inputs.market_cap + wacc_inputs.net_debt),
+            enterprise_value=float(enterprise_value),
+            equity_value=float(equity_value),
+            value_per_share=float(value_per_share),
+            shares_outstanding=float(shares_outstanding),
+            pv_forecast_period=float(pv_forecast),
+            terminal_value=float(terminal_value),
+            pv_terminal_value=float(pv_terminal_value),
+            wacc=float(wacc),
+            cost_of_equity=float(cost_of_equity),
+            levered_beta=float(levered_beta),
+            cost_of_debt_after_tax=float(cost_of_debt_after_tax),
+            weight_equity=float(weight_equity),
+            weight_debt=float(weight_debt),
             fcff_forecast=fcff_forecast,
             discount_factors=discount_factors
         )
@@ -303,12 +310,18 @@ class DCFEngine:
         shares_outstanding: float,
         cash: float,
         debt: float,
-        wacc_range: Tuple[float, float] = (-0.02, 0.02),  # +/- 2%
-        growth_range: Tuple[float, float] = (-0.01, 0.01),  # +/- 1%
+        # --- FIX: Sensitize input parameters directly, not calculated WACC ---
+        rf_rate_range: Tuple[float, float] = (-0.01, 0.01),  # +/- 1% risk-free rate
+        growth_range: Tuple[float, float] = (-0.005, 0.005),  # +/- 0.5% growth rate
+        # --- ------------------------------------------------------------ ---
         steps: int = 5
     ) -> pd.DataFrame:
         """
-        Create sensitivity table for WACC and Terminal Growth Rate
+        Create sensitivity table for Risk-Free Rate and Terminal Growth Rate
+        
+        This is a more standard and interpretable approach than sensitizing WACC directly.
+        We sensitize the primary inputs (risk-free rate and growth rate) and let the
+        DCF calculation naturally derive the resulting WACC and valuation.
         
         Args:
             base_fcff: Base case FCFF forecast
@@ -317,7 +330,7 @@ class DCFEngine:
             shares_outstanding: Shares outstanding
             cash: Cash balance
             debt: Debt balance
-            wacc_range: Range for WACC sensitivity (min, max)
+            rf_rate_range: Range for risk-free rate sensitivity (min, max)
             growth_range: Range for growth rate sensitivity (min, max)
             steps: Number of steps in each dimension
             
@@ -327,15 +340,15 @@ class DCFEngine:
         if terminal_inputs.method.lower() != "gordon":
             raise ValueError("Sensitivity analysis requires Gordon Growth terminal value method")
         
-        base_wacc = base_wacc_inputs.risk_free_rate + \
-                    base_wacc_inputs.unlevered_beta * base_wacc_inputs.equity_risk_premium
+        # --- FIX: Get base values from inputs ---
+        base_rf_rate = float(base_wacc_inputs.risk_free_rate)
+        base_growth = float(terminal_inputs.perpetual_growth_rate)
+        # --- --------------------------------- ---
         
-        base_growth = terminal_inputs.perpetual_growth_rate
-        
-        # Create ranges
-        wacc_values = np.linspace(
-            base_wacc + wacc_range[0],
-            base_wacc + wacc_range[1],
+        # Create ranges by adjusting base values
+        rf_rate_values = np.linspace(
+            base_rf_rate + rf_rate_range[0],
+            base_rf_rate + rf_rate_range[1],
             steps
         )
         
@@ -348,11 +361,11 @@ class DCFEngine:
         # Build sensitivity table
         results = np.zeros((steps, steps))
         
-        for i, wacc_adj in enumerate(wacc_values):
-            for j, growth in enumerate(growth_values):
-                # Adjust WACC inputs
+        for i, rf_rate_adj in enumerate(rf_rate_values):
+            for j, growth_adj in enumerate(growth_values):
+                # --- FIX: Simply adjust the risk-free rate input ---
                 adjusted_wacc_inputs = WACCInputs(
-                    risk_free_rate=wacc_adj - base_wacc_inputs.unlevered_beta * base_wacc_inputs.equity_risk_premium,
+                    risk_free_rate=rf_rate_adj,
                     equity_risk_premium=base_wacc_inputs.equity_risk_premium,
                     unlevered_beta=base_wacc_inputs.unlevered_beta,
                     target_debt_to_equity=base_wacc_inputs.target_debt_to_equity,
@@ -361,11 +374,12 @@ class DCFEngine:
                     market_cap=base_wacc_inputs.market_cap,
                     net_debt=base_wacc_inputs.net_debt
                 )
+                # --- -------------------------------------------- ---
                 
                 # Adjust terminal value inputs
                 adjusted_terminal_inputs = TerminalValueInputs(
                     method="gordon",
-                    perpetual_growth_rate=growth
+                    perpetual_growth_rate=growth_adj
                 )
                 
                 # Calculate DCF
@@ -379,16 +393,18 @@ class DCFEngine:
                         debt=debt
                     )
                     results[i, j] = result.value_per_share
-                except:
+                except Exception as e:
+                    # Log the error for debugging
+                    logger.warning(f"Sensitivity calculation failed for RF={rf_rate_adj:.2%}, g={growth_adj:.2%}: {e}")
                     results[i, j] = np.nan
         
         # Create DataFrame
         df = pd.DataFrame(
             results,
-            index=[f"{w:.2%}" for w in wacc_values],
+            index=[f"{rf:.2%}" for rf in rf_rate_values],
             columns=[f"{g:.2%}" for g in growth_values]
         )
-        df.index.name = "WACC"
+        df.index.name = "Risk-Free Rate"
         df.columns.name = "Terminal Growth"
         
         logger.info("Sensitivity analysis completed")
@@ -403,11 +419,11 @@ class DCFEngine:
         shares_outstanding: float,
         cash: float,
         debt: float,
-        # Distributions for key parameters
-        erp_mean: float = 0.065,
-        erp_std: float = 0.02,
-        beta_std: float = 0.2,
+        # --- FIX: Make these arguments with sensible defaults ---
+        erp_std: float = 0.015,
+        beta_std: float = 0.15,
         growth_std: float = 0.005,
+        # --- ------------------------------------------------ ---
         simulations: int = 10000,
         random_seed: Optional[int] = None
     ) -> Dict[str, Any]:
@@ -416,12 +432,11 @@ class DCFEngine:
         
         Args:
             fcff_forecast: Base FCFF forecast
-            wacc_inputs: Base WACC inputs
-            terminal_inputs: Terminal value inputs
+            wacc_inputs: Base WACC inputs (provides base ERP and beta)
+            terminal_inputs: Terminal value inputs (provides base growth rate)
             shares_outstanding: Shares outstanding
             cash: Cash balance
             debt: Debt balance
-            erp_mean: Mean equity risk premium
             erp_std: Std dev of equity risk premium
             beta_std: Std dev of beta
             growth_std: Std dev of perpetual growth rate
@@ -438,19 +453,24 @@ class DCFEngine:
         
         results = []
         
+        # --- FIX: Get base values from inputs ---
+        base_erp = float(wacc_inputs.equity_risk_premium)
+        base_beta = float(wacc_inputs.unlevered_beta)
+        base_growth = float(terminal_inputs.perpetual_growth_rate) if terminal_inputs.perpetual_growth_rate else 0.0
+        # --- --------------------------------- ---
+        
         for i in range(simulations):
             # Sample from distributions
-            erp_sample = np.random.normal(erp_mean, erp_std)
-            beta_sample = max(0.1, np.random.normal(wacc_inputs.unlevered_beta, beta_std))
+            # --- FIX: Use base_erp from inputs ---
+            erp_sample = np.random.normal(base_erp, erp_std)
+            # --- FIX: Use base_beta from inputs ---
+            beta_sample = max(0.1, np.random.normal(base_beta, beta_std))
             
             if terminal_inputs.perpetual_growth_rate:
-                growth_sample = np.random.normal(
-                    terminal_inputs.perpetual_growth_rate,
-                    growth_std
-                )
-                growth_sample = max(0.0, min(growth_sample, 0.05))  # Bound between 0% and 5%
+                # --- FIX: Use base_growth from inputs ---
+                growth_sample = np.random.normal(base_growth, growth_std)
             else:
-                growth_sample = terminal_inputs.perpetual_growth_rate
+                growth_sample = base_growth
             
             # Create adjusted inputs
             sim_wacc_inputs = WACCInputs(
@@ -464,15 +484,25 @@ class DCFEngine:
                 net_debt=wacc_inputs.net_debt
             )
             
-            sim_terminal_inputs = TerminalValueInputs(
-                method=terminal_inputs.method,
-                perpetual_growth_rate=growth_sample,
-                exit_multiple=terminal_inputs.exit_multiple,
-                terminal_ebitda=terminal_inputs.terminal_ebitda
-            )
-            
-            # Run DCF
+            # --- FIX: Smarter error handling ---
+            # First, get the WACC for this simulation run
             try:
+                sim_wacc, _, _ = self.calculate_wacc(sim_wacc_inputs)
+                
+                # Check for invalid growth rate *before* running the full DCF
+                if terminal_inputs.method.lower() == "gordon":
+                    # --- FIX: Cap growth at WACC - 0.25% to prevent error ---
+                    if growth_sample >= sim_wacc:
+                        growth_sample = sim_wacc - 0.0025  # Cap it, don't just discard
+                
+                sim_terminal_inputs = TerminalValueInputs(
+                    method=terminal_inputs.method,
+                    perpetual_growth_rate=growth_sample,
+                    exit_multiple=terminal_inputs.exit_multiple,
+                    terminal_ebitda=terminal_inputs.terminal_ebitda
+                )
+                
+                # Run DCF
                 result = self.calculate_dcf(
                     fcff_forecast=fcff_forecast,
                     wacc_inputs=sim_wacc_inputs,
@@ -482,7 +512,13 @@ class DCFEngine:
                     debt=debt
                 )
                 results.append(result.value_per_share)
-            except:
+            except ValueError as e:
+                # Log any *other* errors, but we should have caught the main one
+                logger.warning(f"Simulation {i} failed: {e}")
+                continue
+            except Exception as e:
+                # Catch any unexpected errors
+                logger.warning(f"Simulation {i} failed with unexpected error: {e}")
                 continue
         
         results = np.array(results)

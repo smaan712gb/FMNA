@@ -343,7 +343,10 @@ class ModelingAgent:
             llm_summary=llm_summary
         )
         
-        logger.info(f"Valuation Package Complete - Range: ${valuation_range[0]:.2f} - ${valuation_range[1]:.2f}")
+        if valuation_range:
+            logger.info(f"Valuation Package Complete - Range: ${valuation_range[0]:.2f} - ${valuation_range[1]:.2f}")
+        else:
+            logger.warning("Valuation Package Complete - No valuations available (all models failed)")
         
         return package
     

@@ -421,10 +421,10 @@ class ComprehensiveOrchestrator:
         market_data: Dict[str, Any],
         run_dcf: bool = True,
         run_cca: bool = True,
-        run_lbo: bool = False,
+        run_lbo: bool = True,
         run_merger: bool = True,
         run_three_statement: bool = True,
-        run_growth_scenarios: bool = False
+        run_growth_scenarios: bool = True
     ) -> ValuationPackage:
         """
         Run all valuation models with REAL DATA
@@ -449,20 +449,178 @@ class ComprehensiveOrchestrator:
         three_statement_result = None  # FIX: Initialize before use
         merger_result = None
         
-        # Run DCF if requested
+        # CRITICAL FIX: Run 3-Statement Model FIRST (before DCF)
+        # This ensures DCF can use integrated FCFF forecasts
+        if run_three_statement:
+            logger.info("   → Running Integrated 3-Statement Model...")
+            try:
+                from engines.three_statement_model import IntegratedThreeStatementModel, HistoricalData, DriverInputs
+                
+                ts_model = IntegratedThreeStatementModel()
+                
+                # Build historical data
+                income_stmts = financial_data.get('income_statement', [])
+                balance_stmts = financial_data.get('balance_sheet', [])
+                cf_stmts = financial_data.get('cash_flow', [])
+                
+                if income_stmts and balance_stmts and cf_stmts:
+                    # Create period labels (FY-4, FY-3, FY-2, FY-1, FY0)
+                    # Handle cases where different statements have different numbers of periods
+                    num_income = len(income_stmts)
+                    num_balance = len(balance_stmts)
+                    num_cf = len(cf_stmts)
+                    num_periods = min(num_income, num_balance, num_cf, 5)
+                    
+                    # Skip if we don't have enough data (need at least 2 periods)
+                    if num_periods < 2:
+                        logger.warning(f"   ⚠ Insufficient periods for 3-statement model (only {num_periods})")
+                    else:
+                        period_labels = [f'FY-{num_periods - i - 1}' if i < num_periods - 1 else 'FY0' 
+                                        for i in range(num_periods)]
+                        
+                        historical = HistoricalData(
+                            periods=period_labels,
+                            revenue=[float(stmt.get('revenue', 0)) for stmt in income_stmts[:num_periods]],
+                            cogs=[float(stmt.get('costOfRevenue', 0)) for stmt in income_stmts[:num_periods]],
+                            sga=[float(stmt.get('sellingGeneralAndAdministrativeExpenses', 0)) for stmt in income_stmts[:num_periods]],
+                            rnd=[float(stmt.get('researchAndDevelopmentExpenses', 0)) for stmt in income_stmts[:num_periods]],
+                            da=[float(stmt.get('depreciationAndAmortization', 0)) for stmt in income_stmts[:num_periods]],
+                            interest_expense=[float(stmt.get('interestExpense', 0)) for stmt in income_stmts[:num_periods]],
+                            interest_income=[0.0] * num_periods,  # FMP doesn't provide this separately
+                            taxes=[float(stmt.get('incomeTaxExpense', 0)) for stmt in income_stmts[:num_periods]],
+                            net_income=[float(stmt.get('netIncome', 0)) for stmt in income_stmts[:num_periods]],
+                            cash=[float(stmt.get('cashAndCashEquivalents', 0)) for stmt in balance_stmts[:num_periods]],
+                            ar=[float(stmt.get('netReceivables', 0)) for stmt in balance_stmts[:num_periods]],
+                            inventory=[float(stmt.get('inventory', 0)) for stmt in balance_stmts[:num_periods]],
+                            ppe_net=[float(stmt.get('propertyPlantEquipmentNet', 0)) for stmt in balance_stmts[:num_periods]],
+                            goodwill=[float(stmt.get('goodwill', 0)) for stmt in balance_stmts[:num_periods]],
+                            ap=[float(stmt.get('accountPayables', 0)) for stmt in balance_stmts[:num_periods]],
+                            accrued_liabilities=[float(stmt.get('otherCurrentLiabilities', 0)) for stmt in balance_stmts[:num_periods]],
+                            debt=[float(stmt.get('totalDebt', 0)) for stmt in balance_stmts[:num_periods]],
+                            equity=[float(stmt.get('totalStockholdersEquity', 0)) for stmt in balance_stmts[:num_periods]],
+                            capex=[abs(float(stmt.get('capitalExpenditure', 0))) for stmt in cf_stmts[:num_periods]],
+                            sbc=[float(stmt.get('stockBasedCompensation', 0)) for stmt in income_stmts[:num_periods]]
+                        )
+                    
+                        # Calculate current metrics for drivers
+                        current_revenue = float(income_stmt.get('revenue', 0))
+                        current_cogs = float(income_stmt.get('costOfRevenue', 0))
+                        current_opex = float(income_stmt.get('operatingExpenses', 0))
+                        
+                        # CRITICAL FIX: Calculate historical revenue growth rates (last 3 years)
+                        historical_growth_rates = []
+                        for i in range(min(3, len(income_stmts) - 1)):
+                            current = float(income_stmts[i].get('revenue', 0))
+                            prior = float(income_stmts[i + 1].get('revenue', 1))
+                            growth = (current / prior - 1) if prior > 0 else 0.08
+                            historical_growth_rates.append(growth)
+                        
+                        # Calculate average historical growth
+                        if historical_growth_rates:
+                            avg_growth = sum(historical_growth_rates) / len(historical_growth_rates)
+                            # Cap at reasonable range
+                            avg_growth = max(0.0, min(avg_growth, 0.60))  # Cap at 60%
+                            logger.info(f"   → Historical revenue growth rates: {[f'{g:.1%}' for g in historical_growth_rates]}")
+                            logger.info(f"   → Average historical growth: {avg_growth:.1%}")
+                        else:
+                            avg_growth = 0.08
+                        
+                        # Build forecast with decay (15% per year)
+                        forecast_growth_rates = []
+                        decay_rate = 0.85  # 15% decay per year
+                        for year in range(5):
+                            year_growth = avg_growth * (decay_rate ** year)
+                            # Floor at GDP growth
+                            year_growth = max(year_growth, 0.025)
+                            forecast_growth_rates.append(year_growth)
+                        
+                        logger.info(f"   → Forecast revenue growth schedule: {[f'{g:.1%}' for g in forecast_growth_rates]}")
+                        
+                        drivers = DriverInputs(
+                            revenue_growth_rates=forecast_growth_rates,  # Use calculated growth rates
+                            cogs_pct_revenue=[(current_cogs / current_revenue if current_revenue > 0 else 0.60)] * 5,
+                            sga_pct_revenue=[(current_opex * 0.70 / current_revenue if current_revenue > 0 else 0.15)] * 5,
+                            ar_days=[45.0] * 5,
+                            inventory_days=[30.0] * 5,
+                            ap_days=[30.0] * 5,
+                            accrued_days_sga=[15.0] * 5,  # REQUIRED: Accrued liabilities as days of SG&A
+                            capex_pct_revenue=[0.04] * 5,
+                            interest_rate_debt=0.05,
+                            tax_rate=float(income_stmt.get('incomeTaxExpense', 0)) / max(float(income_stmt.get('incomeBeforeTax', 1)), 1),
+                            rnd_pct_revenue=[(current_opex * 0.30 / current_revenue if current_revenue > 0 else 0.10)] * 5,
+                            sbc_pct_revenue=[0.02] * 5
+                        )
+                        
+                        three_statement_result = ts_model.build_integrated_model(
+                            historical=historical,
+                            drivers=drivers
+                        )
+                        
+                        logger.success(f"   ✅ 3-Statement: Integrated model with {num_periods} historical + 5 forecast periods")
+                else:
+                    logger.warning("   ⚠ Insufficient historical data for 3-statement model")
+            except Exception as e:
+                logger.warning(f"   ⚠ 3-Statement model failed: {e}")
+        
+        # Run DCF if requested (NOW USES 3SM FCFF IF AVAILABLE)
         if run_dcf:
             logger.info("   → Running DCF valuation...")
             try:
-                # Build WACC inputs from real data
+                # Helper function to validate FCF data
+                def validate_fcf_data(fcf: float, market_cap: float, symbol: str) -> bool:
+                    """Validate FCF data makes sense"""
+                    if market_cap <= 0:
+                        return True  # Can't validate without market cap
+                    
+                    fcf_to_mcap_ratio = fcf / market_cap
+                    
+                    # Typical range: 0.01 to 0.15 (1% to 15% of market cap)
+                    if fcf_to_mcap_ratio < 0.001 or fcf_to_mcap_ratio > 0.30:
+                        logger.warning(f"⚠️ {symbol} FCF/Market Cap ratio {fcf_to_mcap_ratio:.3f} is unusual")
+                        logger.warning(f"   FCF: ${fcf:,.0f} ({fcf/1e9:.2f}B)")
+                        logger.warning(f"   Market Cap: ${market_cap:,.0f} ({market_cap/1e9:.2f}B)")
+                        logger.warning(f"   This may indicate a data quality issue")
+                        return False
+                    
+                    return True
+                
+                # Helper function to calculate intelligent growth rates
+                def calculate_intelligent_growth_rates(historical_fcf: List[float], default: float = 0.08) -> List[float]:
+                    """Calculate growth rates from historical data with decay"""
+                    if len(historical_fcf) >= 3:
+                        # Calculate historical CAGR
+                        try:
+                            years = len(historical_fcf) - 1
+                            cagr = (historical_fcf[0] / historical_fcf[-1]) ** (1 / years) - 1
+                            # Cap at reasonable levels
+                            cagr = max(-0.20, min(cagr, 0.50))
+                            base_growth = cagr
+                        except:
+                            base_growth = default
+                    else:
+                        base_growth = default
+                    
+                    # Apply decay schedule (15% decay per year)
+                    growth_rates = []
+                    decay_rate = 0.85
+                    for year in range(10):
+                        year_growth = base_growth * (decay_rate ** year)
+                        # Floor at GDP growth
+                        year_growth = max(year_growth, 0.025)
+                        growth_rates.append(year_growth)
+                    
+                    return growth_rates
+                
+                # Build WACC inputs from real data - ENSURE ALL VALUES ARE FLOAT
                 wacc_inputs = WACCInputs(
-                    risk_free_rate=0.045,  # Can fetch from FMP /treasury endpoint
-                    equity_risk_premium=0.065,
-                    unlevered_beta=1.2,  # From beta endpoint or peer average
-                    target_debt_to_equity=float(balance_sheet.get('totalDebt', 0)) / max(float(market_snapshot.get('market_cap', 1)), 1),
-                    cost_of_debt=0.04,  # From interest expense / debt
-                    tax_rate=float(income_stmt.get('incomeTaxExpense', 0)) / max(float(income_stmt.get('incomeBeforeTax', 1)), 1),
+                    risk_free_rate=float(0.045),  # Can fetch from FMP /treasury endpoint
+                    equity_risk_premium=float(0.065),
+                    unlevered_beta=float(1.2),  # From beta endpoint or peer average
+                    target_debt_to_equity=float(float(balance_sheet.get('totalDebt', 0)) / max(float(market_snapshot.get('market_cap', 1)), 1)),
+                    cost_of_debt=float(0.04),  # From interest expense / debt
+                    tax_rate=float(float(income_stmt.get('incomeTaxExpense', 0)) / max(float(income_stmt.get('incomeBeforeTax', 1)), 1)),
                     market_cap=float(market_snapshot.get('market_cap', 0)),
-                    net_debt=float(balance_sheet.get('totalDebt', 0)) - float(balance_sheet.get('cashAndCashEquivalents', 0))
+                    net_debt=float(float(balance_sheet.get('totalDebt', 0)) - float(balance_sheet.get('cashAndCashEquivalents', 0)))
                 )
                 
                 # Build terminal value inputs
@@ -471,38 +629,105 @@ class ComprehensiveOrchestrator:
                     perpetual_growth_rate=0.025
                 )
                 
-                # ACTIVATION: Use 3SM FCFF if available, else build manually
-                # Check if Three Statement Model was run and has FCFF
+                # CRITICAL FIX: Use 3SM FCFF if available (now it actually is!)
                 if three_statement_result and hasattr(three_statement_result, 'fcf_forecast') and three_statement_result.fcf_forecast:
-                    fcff_forecast = three_statement_result.fcf_forecast
-                    logger.info(f"   ✅ Using FCFF from 3-Statement Model ({len(fcff_forecast)} periods)")
-                else:
+                    # Convert from Decimal to float to avoid type errors
+                    fcff_3sm = [float(fcf) for fcf in three_statement_result.fcf_forecast]
+                    
+                    # Get LATEST actual FCF from FMP to verify 3SM base
+                    latest_fcf = float(cash_flow.get('freeCashFlow', 0))
+                    
+                    # Check if 3SM base year matches latest FCF
+                    if fcff_3sm[0] > 0 and latest_fcf > 0:
+                        scaling_factor = latest_fcf / fcff_3sm[0]
+                        
+                        # If 3SM is using old base year, scale to match latest
+                        if scaling_factor > 2.0 or scaling_factor < 0.5:
+                            logger.warning(f"   ⚠️ 3SM base FCF ({fcff_3sm[0]/1e9:.1f}B) differs from latest ({latest_fcf/1e9:.1f}B) by {scaling_factor:.1f}x")
+                            logger.info(f"   → Scaling 3SM forecast to use latest FCF as Year 1")
+                            fcff_forecast = [fcf * scaling_factor for fcf in fcff_3sm]
+                            logger.success(f"   ✅ Scaled FCFF: Year 1 = ${fcff_forecast[0]/1e9:.1f}B (from latest actual)")
+                        else:
+                            fcff_forecast = fcff_3sm
+                            logger.success(f"   ✅ Using FCFF from 3-Statement Model ({len(fcff_forecast)} periods)")
+                    else:
+                        fcff_forecast = fcff_3sm
+                        logger.success(f"   ✅ Using FCFF from 3-Statement Model ({len(fcff_forecast)} periods)")
+                    
+                    # Validate the first year FCF
+                    if not validate_fcf_data(fcff_forecast[0], float(market_snapshot.get('market_cap', 0)), symbol):
+                        logger.warning(f"   ⚠️ 3SM FCFF failed validation - falling back to manual calculation")
+                        three_statement_result = None  # Force fallback
+                
+                if not three_statement_result:
                     # Fallback: Build FCFF forecast from cash flow data
+                    logger.info(f"   → Building FCFF forecast from cash flow data")
                     cf_statements = financial_data.get('cash_flow', [])
-                fcff_forecast = []
-                for cf in cf_statements[:5]:
-                    fcf = float(cf.get('freeCashFlow', 0))
-                    fcff_forecast.append(fcf)
-                    # DEBUG: Log first FCF value to verify units
-                    if len(fcff_forecast) == 1:
-                        logger.info(f"   → DEBUG: First FCF value: ${fcf:,.0f} (verify this is in dollars, not millions)")
+                    fcff_forecast = []
+                    for cf in cf_statements[:5]:
+                        fcf = float(cf.get('freeCashFlow', 0))
+                        fcff_forecast.append(fcf)
+                    
+                    # Validate first FCF
+                    if fcff_forecast:
+                        logger.info(f"   → First FCF value: ${fcff_forecast[0]:,.0f} ({fcff_forecast[0]/1e9:.2f}B)")
+                        if not validate_fcf_data(fcff_forecast[0], float(market_snapshot.get('market_cap', 0)), symbol):
+                            logger.error(f"   ❌ FCF validation failed - DCF results may be unreliable")
+                    
+                    # If not enough history, project forward with intelligent growth
+                    if len(fcff_forecast) < 10:
+                        base_fcf = fcff_forecast[-1] if fcff_forecast else float(cf_statements[0].get('freeCashFlow', 0))
+                        
+                        # Calculate intelligent growth rates
+                        growth_rates = calculate_intelligent_growth_rates(fcff_forecast, default=0.08)
+                        logger.info(f"   → Projecting FCF with intelligent growth: Yr1={growth_rates[0]:.1%}, Yr5={growth_rates[4]:.1%}, Yr10={growth_rates[9]:.1%}")
+                        
+                        # Project forward
+                        current_fcf = base_fcf
+                        for i in range(10 - len(fcff_forecast)):
+                            current_fcf = current_fcf * (1 + growth_rates[len(fcff_forecast) + i])
+                            fcff_forecast.append(current_fcf)
+                        
+                        # Trim to 10 years
+                        fcff_forecast = fcff_forecast[:10]
                 
-                # If not enough history, project forward
-                if len(fcff_forecast) < 5:
-                    base_fcf = fcff_forecast[-1] if fcff_forecast else float(cf_statements[0].get('freeCashFlow', 0))
-                    growth_rate = 0.08
-                    for i in range(5 - len(fcff_forecast)):
-                        fcff_forecast.append(base_fcf * ((1 + growth_rate) ** (i + 1)))
-                
-                # Calculate shares outstanding
+                # Calculate shares outstanding - ENSURE FLOAT
                 shares_out = market_snapshot.get('shares_outstanding')
                 if not shares_out:
                     shares_out = float(market_snapshot['market_cap']) / float(market_snapshot['price'])
+                else:
+                    shares_out = float(shares_out)  # Convert to float if retrieved from API
                 
-                # Run DCF
+                # Log DCF inputs for debugging
+                logger.info("="*80)
+                logger.info(f"DCF INPUTS FOR {symbol}")
+                logger.info("="*80)
+                logger.info(f"FCFF Forecast ({len(fcff_forecast)} years):")
+                for i, fcf in enumerate(fcff_forecast[:5], 1):
+                    logger.info(f"  Year {i}: ${fcf:,.0f} ({fcf/1e9:.2f}B)")
+                if len(fcff_forecast) > 5:
+                    logger.info(f"  ... (showing first 5 of {len(fcff_forecast)} years)")
+                
+                avg_fcf = sum(fcff_forecast) / len(fcff_forecast)
+                fcf_yield = (avg_fcf / float(market_snapshot.get('market_cap', 1)) * 100) if market_snapshot.get('market_cap') else 0
+                logger.info(f"\nWACC: {wacc_inputs.risk_free_rate + wacc_inputs.unlevered_beta * wacc_inputs.equity_risk_premium:.2%} (est)")
+                logger.info(f"Shares Outstanding: {shares_out:,.0f} ({shares_out/1e9:.2f}B)")
+                logger.info(f"Current Market Cap: ${market_snapshot.get('market_cap', 0):,.0f} ({market_snapshot.get('market_cap', 0)/1e9:.2f}B)")
+                logger.info(f"Average FCF: ${avg_fcf:,.0f} ({avg_fcf/1e9:.2f}B)")
+                logger.info(f"FCF Yield: {fcf_yield:.2%}")
+                
+                if fcf_yield < 0.5:
+                    logger.warning(f"⚠️ FCF yield < 0.5% - Possible unit or data issue!")
+                elif fcf_yield > 20:
+                    logger.warning(f"⚠️ FCF yield > 20% - Possible unit or data issue!")
+                else:
+                    logger.success(f"✅ FCF yield in reasonable range")
+                logger.info("="*80)
+                
+                # Run DCF - DOUBLE-CHECK ALL FLOATS
                 dcf_result = self.modeling.run_dcf_valuation(
                     symbol=symbol,
-                    fcff_forecast=fcff_forecast,
+                    fcff_forecast=fcff_forecast,  # Already converted to float list above
                     wacc_inputs=wacc_inputs,
                     terminal_inputs=terminal_inputs,
                     shares_outstanding=float(shares_out),
@@ -794,86 +1019,6 @@ class ComprehensiveOrchestrator:
             except Exception as e:
                 logger.warning(f"   ⚠ Merger analysis failed: {e}")
         
-        # Run Three Statement Model if requested
-        three_statement_result = None
-        if run_three_statement:
-            logger.info("   → Running Integrated 3-Statement Model...")
-            try:
-                from engines.three_statement_model import ThreeStatementModel, HistoricalData, DriverInputs
-                
-                ts_model = ThreeStatementModel()
-                
-                # Build historical data
-                income_stmts = financial_data.get('income_statement', [])
-                balance_stmts = financial_data.get('balance_sheet', [])
-                cf_stmts = financial_data.get('cash_flow', [])
-                
-                if income_stmts and balance_stmts and cf_stmts:
-                    # Create period labels (FY-4, FY-3, FY-2, FY-1, FY0)
-                    # Handle cases where different statements have different numbers of periods
-                    num_income = len(income_stmts)
-                    num_balance = len(balance_stmts)
-                    num_cf = len(cf_stmts)
-                    num_periods = min(num_income, num_balance, num_cf, 5)
-                    
-                    # Skip if we don't have enough data (need at least 2 periods)
-                    if num_periods < 2:
-                        logger.warning(f"   ⚠ Insufficient periods for 3-statement model (only {num_periods})")
-                    else:
-                        period_labels = [f'FY-{num_periods - i - 1}' if i < num_periods - 1 else 'FY0' 
-                                        for i in range(num_periods)]
-                        
-                        historical = HistoricalData(
-                            periods=period_labels,
-                            revenue=[float(stmt.get('revenue', 0)) for stmt in income_stmts[:num_periods]],
-                            cogs=[float(stmt.get('costOfRevenue', 0)) for stmt in income_stmts[:num_periods]],
-                            sga=[float(stmt.get('sellingGeneralAndAdministrativeExpenses', 0)) for stmt in income_stmts[:num_periods]],
-                            rnd=[float(stmt.get('researchAndDevelopmentExpenses', 0)) for stmt in income_stmts[:num_periods]],
-                            da=[float(stmt.get('depreciationAndAmortization', 0)) for stmt in income_stmts[:num_periods]],
-                            interest_expense=[float(stmt.get('interestExpense', 0)) for stmt in income_stmts[:num_periods]],
-                            taxes=[float(stmt.get('incomeTaxExpense', 0)) for stmt in income_stmts[:num_periods]],
-                            cash=[float(stmt.get('cashAndCashEquivalents', 0)) for stmt in balance_stmts[:num_periods]],
-                            ar=[float(stmt.get('netReceivables', 0)) for stmt in balance_stmts[:num_periods]],
-                            inventory=[float(stmt.get('inventory', 0)) for stmt in balance_stmts[:num_periods]],
-                            ppe=[float(stmt.get('propertyPlantEquipmentNet', 0)) for stmt in balance_stmts[:num_periods]],
-                            goodwill=[float(stmt.get('goodwill', 0)) for stmt in balance_stmts[:num_periods]],
-                            ap=[float(stmt.get('accountPayables', 0)) for stmt in balance_stmts[:num_periods]],
-                            debt=[float(stmt.get('totalDebt', 0)) for stmt in balance_stmts[:num_periods]],
-                            equity=[float(stmt.get('totalStockholdersEquity', 0)) for stmt in balance_stmts[:num_periods]],
-                            sbc=[float(stmt.get('stockBasedCompensation', 0)) for stmt in income_stmts[:num_periods]],
-                            capex=[abs(float(stmt.get('capitalExpenditure', 0))) for stmt in cf_stmts[:num_periods]]
-                        )
-                    
-                        # Calculate current metrics for drivers
-                        current_revenue = float(income_stmt.get('revenue', 0))
-                        current_cogs = float(income_stmt.get('costOfRevenue', 0))
-                        current_opex = float(income_stmt.get('operatingExpenses', 0))
-                        
-                        drivers = DriverInputs(
-                            revenue_growth_rates=[0.08, 0.08, 0.07, 0.06, 0.05],
-                            cogs_pct_revenue=[(current_cogs / current_revenue if current_revenue > 0 else 0.60)] * 5,
-                            sga_pct_revenue=[(current_opex * 0.70 / current_revenue if current_revenue > 0 else 0.15)] * 5,
-                            da_pct_revenue=[0.03] * 5,
-                            ar_days=[45.0] * 5,
-                            inventory_days=[30.0] * 5,
-                            ap_days=[30.0] * 5,
-                            capex_pct_revenue=[0.04] * 5,
-                            interest_rate=0.05,
-                            tax_rate=float(income_stmt.get('incomeTaxExpense', 0)) / max(float(income_stmt.get('incomeBeforeTax', 1)), 1),
-                            rnd_pct_revenue=[(current_opex * 0.30 / current_revenue if current_revenue > 0 else 0.10)] * 5,
-                            sbc_pct_revenue=[0.02] * 5
-                        )
-                        
-                        three_statement_result = ts_model.build_integrated_model(
-                            historical=historical,
-                            drivers=drivers
-                        )
-                        
-                        logger.success(f"   ✅ 3-Statement: Integrated model with {num_periods} historical + 5 forecast periods")
-                else:
-                    logger.warning("   ⚠ Insufficient historical data for 3-statement model")
-            except Exception as e:
-                logger.warning(f"   ⚠ 3-Statement model failed: {e}")
         
         # Run Growth Scenarios if requested
         if run_growth_scenarios:

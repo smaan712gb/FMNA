@@ -1,7 +1,7 @@
 """
-3-Statement Model Builder
-Integrated financial model with revenue drivers, margin ladders, working capital, debt schedules
-Supports Historical + Forecast periods (e.g., FY-2, FY-1, FY0, FY+1, FY+2, FY+3, FY+4, FY+5)
+Truly Integrated 3-Statement Model
+Builds year-by-year to handle circular references properly
+NO PLUGS - Cash is the result, Equity is a roll-forward
 """
 
 from typing import Dict, List, Optional, Tuple, Any
@@ -13,507 +13,668 @@ from loguru import logger
 
 @dataclass
 class HistoricalData:
-    """Historical financial data"""
-    periods: List[str]  # e.g., ['FY-2', 'FY-1', 'FY0']
+    """Historical financial data - MUST balance or you have data integrity issues"""
+    periods: List[str]
+    
+    # Income Statement
     revenue: List[float]
     cogs: List[float]
     sga: List[float]
     rnd: List[float]
     da: List[float]
     interest_expense: List[float]
+    interest_income: List[float]
     taxes: List[float]
+    net_income: List[float]
     
-    # Balance Sheet
+    # Balance Sheet - MUST BALANCE
     cash: List[float]
     ar: List[float]
     inventory: List[float]
-    ppe: List[float]
+    ppe_net: List[float]
     goodwill: List[float]
+    
     ap: List[float]
+    accrued_liabilities: List[float]
     debt: List[float]
     equity: List[float]
     
-    # Additional items
+    # Cash Flow items
+    capex: List[float]
+    dividends: Optional[List[float]] = None
     sbc: Optional[List[float]] = None
-    capex: Optional[List[float]] = None
 
 
 @dataclass
 class DriverInputs:
-    """Revenue and operational drivers for forecast periods"""
-    # Growth and margin assumptions
+    """Smart drivers for forecast periods"""
+    # Revenue growth
     revenue_growth_rates: List[float]
+    
+    # Margins (% of revenue)
     cogs_pct_revenue: List[float]
     sga_pct_revenue: List[float]
-    da_pct_revenue: List[float]
     
-    # Working capital assumptions
+    # Working capital (in days)
     ar_days: List[float]
     inventory_days: List[float]
     ap_days: List[float]
+    accrued_days_sga: List[float]  # Accrued as days of SG&A
     
-    # CapEx and financing
+    # CapEx
     capex_pct_revenue: List[float]
-    interest_rate: float
+    
+    # Financing
+    interest_rate_debt: float
     tax_rate: float
     
-    # Optional fields
-    revenue_drivers: Optional[Dict[str, List[float]]] = None
+    # Optional fields (must come after required fields)
     rnd_pct_revenue: Optional[List[float]] = None
-    mandatory_debt_payment: float = 0.0
     sbc_pct_revenue: Optional[List[float]] = None
-    operating_lease_pct_revenue: Optional[float] = None
+    ppe_depreciation_years: float = 10.0  # For depreciation schedule
+    interest_rate_cash: float = 0.02  # Earn interest on cash
+    mandatory_debt_payment: float = 0.0
+    
+    # Revolver (optional)
+    has_revolver: bool = True
+    revolver_rate: float = 0.06
+    min_cash_balance: float = 0.0
+    
+    # Other
+    dividends_pct_ni: float = 0.0  # % of NI paid as dividends
+
+
+@dataclass  
+class YearResult:
+    """Results for a single year"""
+    period: str
+    
+    # Income Statement
+    revenue: float
+    cogs: float
+    gross_profit: float
+    sga: float
+    rnd: float
+    da: float
+    sbc: float
+    ebitda: float
+    ebit: float
+    interest_expense: float
+    interest_income: float
+    ebt: float
+    taxes: float
+    net_income: float
+    
+    # Balance Sheet - Beginning
+    beg_cash: float
+    beg_debt: float
+    beg_revolver: float
+    beg_equity: float
+    beg_ppe_net: float
+    
+    # Balance Sheet - Ending
+    cash: float
+    ar: float
+    inventory: float
+    ppe_net: float
+    goodwill: float
+    total_assets: float
+    
+    ap: float
+    accrued_liabilities: float
+    debt: float
+    revolver: float
+    total_liabilities: float
+    equity: float
+    total_liab_equity: float
+    
+    # Cash Flow
+    cfo: float
+    capex: float  # Stored as a positive expense
+    cfi: float
+    dividends: float
+    debt_payment: float
+    revolver_draw: float
+    cff: float
+    net_cash_flow: float
+    
+    # Validation
+    balance_check: bool
+    balance_error: float
 
 
 @dataclass
 class ThreeStatementResult:
-    """3-Statement model output with historical + forecast"""
-    income_statement: pd.DataFrame
-    balance_sheet: pd.DataFrame
-    cash_flow_statement: pd.DataFrame
-    working_capital_schedule: pd.DataFrame
-    debt_schedule: pd.DataFrame
+    """Complete 3-statement model output"""
+    years: List[YearResult]
     
-    # Separate historical and forecast
+    # Periods
     historical_periods: List[str]
     forecast_periods: List[str]
     
-    # Key metrics
+    # DataFrames
+    income_statement: pd.DataFrame
+    balance_sheet: pd.DataFrame
+    cash_flow_statement: pd.DataFrame
+    
+    # Forecast metrics
     fcf_forecast: List[float]
     ebitda_forecast: List[float]
     net_income_forecast: List[float]
     
     # Validation
-    balance_check: bool
-    cash_flow_check: bool
-    
-    # Metadata
-    base_year: str  # e.g., 'FY0'
+    all_balance_checks_pass: bool
+    max_balance_error: float
 
 
-class ThreeStatementModel:
-    """3-Statement Integrated Financial Model with Historical + Forecast"""
+class IntegratedThreeStatementModel:
+    """
+    Truly integrated 3-statement model
+    Builds year-by-year, handles circular references, NO PLUGS
+    """
     
     def __init__(self):
-        """Initialize 3-statement model"""
-        logger.info("3-Statement Model initialized with historical + forecast support")
+        logger.info("Integrated 3-Statement Model initialized (year-by-year construction)")
     
-    def _build_historical_income_statement(self, historical: HistoricalData) -> pd.DataFrame:
-        """Build historical income statement"""
-        hist_data = []
-        
-        for i, period in enumerate(historical.periods):
-            revenue = historical.revenue[i]
-            cogs = historical.cogs[i]
-            gross_profit = revenue - cogs
-            sga = historical.sga[i]
-            rnd = historical.rnd[i]
-            da = historical.da[i]
-            sbc = historical.sbc[i] if historical.sbc else 0
+    def _validate_historical_data(self, hist: HistoricalData) -> None:
+        """Validate that historical data balances and is internally consistent"""
+        for i, period in enumerate(hist.periods):
+            # --- FIX: Added Income Statement validation ---
+            ebitda = hist.revenue[i] - hist.cogs[i] - hist.sga[i] - hist.rnd[i]
+            ebit = ebitda - hist.da[i]
+            ebt = ebit - hist.interest_expense[i] + hist.interest_income[i]
+            ni = ebt - hist.taxes[i]
             
-            ebitda = gross_profit - sga - rnd
-            ebit = ebitda - da
-            interest = historical.interest_expense[i]
-            ebt = ebit - interest
-            taxes = historical.taxes[i]
+            if abs(ni - hist.net_income[i]) > 1.0:
+                 raise ValueError(
+                    f"Historical IS data does not roll for {period}: "
+                    f"Calculated NI={ni:,.0f}, Provided NI={hist.net_income[i]:,.0f}"
+                )
+
+            # Check balance sheet equation
+            assets = hist.cash[i] + hist.ar[i] + hist.inventory[i] + hist.ppe_net[i] + hist.goodwill[i]
+            liab = hist.ap[i] + hist.accrued_liabilities[i] + hist.debt[i]
+            equity = hist.equity[i]
+            
+            error = abs(assets - (liab + equity))
+            if error > 1.0:  # Allow $1 rounding error
+                raise ValueError(
+                    f"Historical BS data does not balance for {period}: "
+                    f"Assets={assets:,.0f}, Liab+Equity={liab+equity:,.0f}, Error={error:,.0f}"
+                )
+        
+        logger.info(f"✓ Historical data validated for {len(hist.periods)} periods")
+    
+    def _build_one_year(
+        self,
+        period: str,
+        is_forecast: bool,
+        
+        # Drivers
+        revenue: float,
+        drivers: DriverInputs,
+        driver_idx: int,
+        
+        # Prior year balance sheet
+        prior_cash: float,
+        prior_ar: float,
+        prior_inventory: float,
+        prior_ppe_net: float,
+        prior_goodwill: float,
+        prior_ap: float,
+        prior_accrued: float,
+        prior_debt: float,
+        prior_revolver: float,
+        prior_equity: float,
+        
+    ) -> YearResult:
+        """
+        Build one year of integrated financials
+        This is where the circular reference magic happens
+        """
+        
+        # ================================================================
+        # Step 1: Build Income Statement (Top Half - Revenue to EBIT)
+        # ================================================================
+        cogs = revenue * drivers.cogs_pct_revenue[driver_idx]
+        gross_profit = revenue - cogs
+        sga = revenue * drivers.sga_pct_revenue[driver_idx]
+        rnd = revenue * drivers.rnd_pct_revenue[driver_idx] if drivers.rnd_pct_revenue else 0.0
+        sbc = revenue * drivers.sbc_pct_revenue[driver_idx] if drivers.sbc_pct_revenue else 0.0
+        
+        # ================================================================
+        # Step 2: Build Asset Schedules (Non-Cash)
+        # ================================================================
+        # Accounts Receivable (from Revenue)
+        ar = revenue * (drivers.ar_days[driver_idx] / 365.0)
+        
+        # Inventory (from COGS)
+        inventory = cogs * (drivers.inventory_days[driver_idx] / 365.0)
+        
+        # PP&E Net (from CapEx and D&A)
+        capex = revenue * drivers.capex_pct_revenue[driver_idx]
+        
+        # --- FIX: Simplified D&A calculation ---
+        # Assumes straight-line depreciation on the *prior* asset base
+        # This is a common simplification. A more complex model would use vintages.
+        da = prior_ppe_net / drivers.ppe_depreciation_years
+        
+        ppe_net = prior_ppe_net + capex - da
+        goodwill = prior_goodwill  # Goodwill doesn't change unless impairment
+        
+        # EBITDA and EBIT (now that we have D&A)
+        ebitda = gross_profit - sga - rnd
+        ebit = ebitda - da
+        
+        # ================================================================
+        # Step 3: Build Liability Schedules (Non-Debt)
+        # ================================================================
+        # Accounts Payable (from COGS)
+        ap = cogs * (drivers.ap_days[driver_idx] / 365.0)
+        
+        # Accrued Liabilities (smart: from SG&A, not revenue)
+        accrued_liabilities = sga * (drivers.accrued_days_sga[driver_idx] / 365.0)
+        
+        # ================================================================
+        # Step 4: Build Partial Cash Flow Statement
+        # ================================================================
+        # Changes in NWC
+        delta_ar = ar - prior_ar
+        delta_inventory = inventory - prior_inventory
+        delta_ap = ap - prior_ap
+        delta_accrued = accrued_liabilities - prior_accrued
+        
+        change_in_nwc = delta_ar + delta_inventory - delta_ap - delta_accrued
+        
+        # ================================================================
+        # Step 5: Debt & Cash Schedule (CIRCULAR REFERENCE SOLVER)
+        # ================================================================
+        # We need to solve for: Cash, Revolver, Interest, Taxes, Net Income
+        # This is circular because Interest depends on avg debt/cash, which depends 
+        # on ending cash, which depends on net income, which depends on interest!
+        
+        # Calculate debt payment ONCE (not circular)
+        debt_payment = min(drivers.mandatory_debt_payment, max(0.0, prior_debt))
+        ending_debt = max(0.0, prior_debt - debt_payment)
+        
+        # Use iterative approach for circular references (cash, revolver, interest)
+        MAX_ITERATIONS = 20
+        TOLERANCE = 0.01
+        
+        # Initial guesses
+        ending_cash = prior_cash
+        ending_revolver = prior_revolver
+        
+        for iteration in range(MAX_ITERATIONS):
+            # Calculate average balances for interest
+            avg_debt = (prior_debt + ending_debt) / 2.0
+            avg_revolver = (prior_revolver + ending_revolver) / 2.0
+            avg_cash = (prior_cash + ending_cash) / 2.0
+            
+            # Calculate interest
+            interest_expense = (avg_debt * drivers.interest_rate_debt + 
+                                avg_revolver * drivers.revolver_rate)
+            interest_income = avg_cash * drivers.interest_rate_cash
+            
+            # Complete Income Statement
+            ebt = ebit - interest_expense + interest_income
+            taxes = max(0.0, ebt * drivers.tax_rate)  # TODO: Add NOL tracking
             net_income = ebt - taxes
             
-            hist_data.append({
-                'Period': period,
-                'Revenue': revenue,
-                'COGS': cogs,
-                'Gross_Profit': gross_profit,
-                'Gross_Margin_%': (gross_profit / revenue * 100) if revenue > 0 else 0,
-                'SGA': sga,
-                'RD': rnd,
-                'DA': da,
-                'SBC': sbc,
-                'EBITDA': ebitda,
-                'EBITDA_Margin_%': (ebitda / revenue * 100) if revenue > 0 else 0,
-                'EBIT': ebit,
-                'EBIT_Margin_%': (ebit / revenue * 100) if revenue > 0 else 0,
-                'Interest_Expense': interest,
-                'EBT': ebt,
-                'Taxes': taxes,
-                'Tax_Rate_%': (taxes / ebt * 100) if ebt > 0 else 0,
-                'Net_Income': net_income,
-                'Net_Margin_%': (net_income / revenue * 100) if revenue > 0 else 0
-            })
+            # Cash From Operations
+            cfo = net_income + da + sbc - change_in_nwc
+            
+            # Cash From Investing
+            cfi = -capex
+            
+            # Cash Flow Before Financing
+            cf_before_financing = cfo + cfi
+            
+            # Calculate new ending balances
+            cash_available = prior_cash + cf_before_financing
+            
+            # Pay mandatory debt (already calculated above)
+            cash_available -= debt_payment
+            
+            # Pay dividends
+            dividends = net_income * drivers.dividends_pct_ni
+            cash_available -= dividends
+            
+            # Handle revolver / cash balance
+            if cash_available < drivers.min_cash_balance:
+                # Draw from revolver
+                revolver_draw = drivers.min_cash_balance - cash_available
+                new_ending_cash = drivers.min_cash_balance
+                # --- FIX: Must be based on prior_revolver, not iteration guess ---
+                new_ending_revolver = prior_revolver + revolver_draw
+                
+            elif cash_available > drivers.min_cash_balance and prior_revolver > 0:
+                # Pay down revolver (cash sweep)
+                excess_cash = cash_available - drivers.min_cash_balance
+                revolver_paydown = min(excess_cash, prior_revolver)
+                new_ending_cash = cash_available - revolver_paydown
+                # --- FIX: Must be based on prior_revolver, not iteration guess ---
+                new_ending_revolver = prior_revolver - revolver_paydown
+                revolver_draw = -revolver_paydown
+            else:
+                # Keep cash as is
+                new_ending_cash = cash_available
+                # --- FIX: Must be based on prior_revolver, not iteration guess ---
+                new_ending_revolver = prior_revolver
+                revolver_draw = 0.0
+            
+            # Check convergence (only cash and revolver are circular)
+            cash_error = abs(new_ending_cash - ending_cash)
+            revolver_error = abs(new_ending_revolver - ending_revolver)
+            
+            if cash_error < TOLERANCE and revolver_error < TOLERANCE:
+                # Converged!
+                ending_cash = new_ending_cash
+                ending_revolver = new_ending_revolver
+                break
+            
+            # Update for next iteration
+            ending_cash = new_ending_cash
+            ending_revolver = new_ending_revolver
         
-        return pd.DataFrame(hist_data)
+        else:
+            logger.warning(f"Circular reference did not converge for {period} after {MAX_ITERATIONS} iterations")
+        
+        # ================================================================
+        # Step 6: Complete Equity Roll-Forward
+        # ================================================================
+        # Equity = Prior Equity + Net Income - Dividends + Share Issuances - Repurchases
+        # For now, no issuances/repurchases
+        ending_equity = prior_equity + net_income - dividends
+        
+        # ================================================================
+        # Step 7: Assemble Balance Sheet & Validate
+        # ================================================================
+        total_assets = ending_cash + ar + inventory + ppe_net + goodwill
+        total_liabilities = ap + accrued_liabilities + ending_debt + ending_revolver
+        total_liab_equity = total_liabilities + ending_equity
+        
+        balance_error = abs(total_assets - total_liab_equity)
+        balance_check = balance_error < 1.0  # $1 tolerance
+        
+        if not balance_check:
+            logger.warning(f"{period}: Balance sheet error = ${balance_error:,.2f}")
+        
+        # ================================================================
+        # Step 8: Assemble Cash Flow Statement
+        # ================================================================
+        cff = -debt_payment + revolver_draw - dividends
+        net_cash_flow = cfo + cfi + cff
+        
+        # Validation: net_cash_flow should equal change in cash
+        expected_cash_change = ending_cash - prior_cash
+        if abs(net_cash_flow - expected_cash_change) > 0.01:
+            logger.warning(f"{period}: Cash flow mismatch: {net_cash_flow:.2f} vs {expected_cash_change:.2f}")
+        
+        # ================================================================
+        # Return complete year result
+        # ================================================================
+        return YearResult(
+            period=period,
+            revenue=revenue,
+            cogs=cogs,
+            gross_profit=gross_profit,
+            sga=sga,
+            rnd=rnd,
+            da=da,
+            sbc=sbc,
+            ebitda=ebitda,
+            ebit=ebit,
+            interest_expense=interest_expense,
+            interest_income=interest_income,
+            ebt=ebt,
+            taxes=taxes,
+            net_income=net_income,
+            beg_cash=prior_cash,
+            beg_debt=prior_debt,
+            beg_revolver=prior_revolver,
+            beg_equity=prior_equity,
+            beg_ppe_net=prior_ppe_net,
+            cash=ending_cash,
+            ar=ar,
+            inventory=inventory,
+            ppe_net=ppe_net,
+            goodwill=goodwill,
+            total_assets=total_assets,
+            ap=ap,
+            accrued_liabilities=accrued_liabilities,
+            debt=ending_debt,
+            revolver=ending_revolver,
+            total_liabilities=total_liabilities,
+            equity=ending_equity,
+            total_liab_equity=total_liab_equity,
+            cfo=cfo,
+            capex=capex,  # --- FIX: Store positive expense ---
+            cfi=cfi,
+            dividends=dividends,
+            debt_payment=debt_payment,
+            revolver_draw=revolver_draw,
+            cff=cff,
+            net_cash_flow=net_cash_flow,
+            balance_check=balance_check,
+            balance_error=balance_error
+        )
     
-    def _build_forecast_income_statement(self, drivers: DriverInputs, base_revenue: float, 
-                                        base_debt: float, forecast_years: int, 
-                                        start_year: int = 1) -> pd.DataFrame:
-        """Build forecast income statement"""
-        projections = []
-        revenue = base_revenue
-        debt = base_debt
+    def build_integrated_model(
+        self,
+        historical: HistoricalData,
+        drivers: DriverInputs,
+        forecast_years: int = 5
+    ) -> ThreeStatementResult:
+        """
+        Build truly integrated 3-statement model
+        NO PLUGS - everything flows naturally
+        """
         
-        for year in range(forecast_years):
-            # Apply growth rate
-            if year > 0:
-                revenue = revenue * (1 + drivers.revenue_growth_rates[year])
-            elif year == 0 and start_year > 0:
-                revenue = revenue * (1 + drivers.revenue_growth_rates[year])
-            
-            cogs = revenue * drivers.cogs_pct_revenue[year]
-            gross_profit = revenue - cogs
-            sga = revenue * drivers.sga_pct_revenue[year]
-            rnd = revenue * drivers.rnd_pct_revenue[year] if drivers.rnd_pct_revenue else 0
-            da = revenue * drivers.da_pct_revenue[year]
-            sbc = revenue * drivers.sbc_pct_revenue[year] if drivers.sbc_pct_revenue else 0
-            
-            ebitda = gross_profit - sga - rnd
-            ebit = ebitda - da
-            interest = debt * drivers.interest_rate
-            ebt = ebit - interest
-            taxes = max(0, ebt * drivers.tax_rate)
-            net_income = ebt - taxes
-            
-            # Update debt for next period
-            debt = max(0, debt - drivers.mandatory_debt_payment)
-            
-            projections.append({
-                'Period': f'FY+{start_year + year}',
-                'Revenue': revenue,
-                'COGS': cogs,
-                'Gross_Profit': gross_profit,
-                'Gross_Margin_%': (gross_profit / revenue * 100) if revenue > 0 else 0,
-                'SGA': sga,
-                'RD': rnd,
-                'DA': da,
-                'SBC': sbc,
-                'EBITDA': ebitda,
-                'EBITDA_Margin_%': (ebitda / revenue * 100) if revenue > 0 else 0,
-                'EBIT': ebit,
-                'EBIT_Margin_%': (ebit / revenue * 100) if revenue > 0 else 0,
-                'Interest_Expense': interest,
-                'EBT': ebt,
-                'Taxes': taxes,
-                'Tax_Rate_%': (taxes / ebt * 100) if ebt > 0 else 0,
-                'Net_Income': net_income,
-                'Net_Margin_%': (net_income / revenue * 100) if revenue > 0 else 0
-            })
+        logger.info(f"Building integrated model: {len(historical.periods)} historical + {forecast_years} forecast")
         
-        return pd.DataFrame(projections)
-    
-    def _build_historical_balance_sheet(self, historical: HistoricalData) -> pd.DataFrame:
-        """Build historical balance sheet - ensures balance sheet equation holds"""
-        hist_data = []
+        # Validate historical data
+        self._validate_historical_data(historical)
         
+        all_years: List[YearResult] = []
+        
+        # ================================================================
+        # Build Historical Years (just convert to YearResult format)
+        # ================================================================
         for i, period in enumerate(historical.periods):
-            # Assets
-            cash = historical.cash[i]
-            ar = historical.ar[i]
-            inventory = historical.inventory[i]
-            current_assets = cash + ar + inventory
+            # Calculate values needed for packaging
+            ebitda = historical.revenue[i] - historical.cogs[i] - historical.sga[i] - historical.rnd[i]
+            ebit = ebitda - historical.da[i]
+            ebt = ebit - historical.interest_expense[i] + historical.interest_income[i]
+            assets = historical.cash[i] + historical.ar[i] + historical.inventory[i] + historical.ppe_net[i] + historical.goodwill[i]
+            liab = historical.ap[i] + historical.accrued_liabilities[i] + historical.debt[i]
             
-            ppe = historical.ppe[i]
-            goodwill = historical.goodwill[i]
-            total_assets = current_assets + ppe + goodwill
+            # --- FIX: Use np.nan for i=0 "Beginning" balances ---
+            beg_cash = historical.cash[i-1] if i > 0 else np.nan
+            beg_debt = historical.debt[i-1] if i > 0 else np.nan
+            beg_equity = historical.equity[i-1] if i > 0 else np.nan
+            beg_ppe_net = historical.ppe_net[i-1] if i > 0 else np.nan
+            net_cash_flow = historical.cash[i] - beg_cash if i > 0 else np.nan
             
-            # Liabilities
-            ap = historical.ap[i]
-            total_debt = historical.debt[i]
-            equity = historical.equity[i]
+            # Historical is already balanced, just package it
+            year = YearResult(
+                period=period,
+                revenue=historical.revenue[i],
+                cogs=historical.cogs[i],
+                gross_profit=historical.revenue[i] - historical.cogs[i],
+                sga=historical.sga[i],
+                rnd=historical.rnd[i],
+                da=historical.da[i],
+                sbc=historical.sbc[i] if historical.sbc else 0.0,
+                ebitda=ebitda,
+                ebit=ebit,
+                interest_expense=historical.interest_expense[i],
+                interest_income=historical.interest_income[i],
+                ebt=ebt,
+                taxes=historical.taxes[i],
+                net_income=historical.net_income[i],
+                beg_cash=beg_cash,
+                beg_debt=beg_debt,
+                beg_revolver=0.0,
+                beg_equity=beg_equity,
+                beg_ppe_net=beg_ppe_net,
+                cash=historical.cash[i],
+                ar=historical.ar[i],
+                inventory=historical.inventory[i],
+                ppe_net=historical.ppe_net[i],
+                goodwill=historical.goodwill[i],
+                total_assets=assets,
+                ap=historical.ap[i],
+                accrued_liabilities=historical.accrued_liabilities[i],
+                debt=historical.debt[i],
+                revolver=0.0,
+                total_liabilities=liab,
+                equity=historical.equity[i],
+                total_liab_equity=liab + historical.equity[i],
+                cfo=np.nan,  # Can't derive from partial data
+                capex=historical.capex[i], # --- FIX: Store positive ---
+                cfi=-historical.capex[i], # --- FIX: CFI is negative ---
+                dividends=historical.dividends[i] if historical.dividends else 0.0,
+                debt_payment=np.nan,
+                revolver_draw=np.nan,
+                cff=np.nan,
+                net_cash_flow=net_cash_flow,
+                balance_check=True,
+                balance_error=0.0
+            )
+            all_years.append(year)
+        
+        # ================================================================
+        # Build Forecast Years (year-by-year with circular references)
+        # ================================================================
+        for year_idx in range(forecast_years):
+            period = f"FY+{year_idx + 1}"
             
-            # Calculate accrued liabilities as plug to balance the sheet
-            # Assets = Liabilities + Equity
-            # Assets = AP + Accrued + Debt + Equity
-            # Accrued = Assets - AP - Debt - Equity
-            accrued = total_assets - ap - total_debt - equity
+            # Get prior year (last forecast year or last historical year)
+            prior = all_years[-1]
             
-            current_liabilities = ap + accrued
-            total_liabilities = current_liabilities + total_debt
+            # --- FIX: Simplified revenue calculation (no if/else needed) ---
+            revenue = prior.revenue * (1 + drivers.revenue_growth_rates[year_idx])
             
-            balance_check = abs(total_assets - (total_liabilities + equity)) < 0.01
+            # Build the year
+            year = self._build_one_year(
+                period=period,
+                is_forecast=True,
+                revenue=revenue,
+                drivers=drivers,
+                driver_idx=year_idx,
+                prior_cash=prior.cash,
+                prior_ar=prior.ar,
+                prior_inventory=prior.inventory,
+                prior_ppe_net=prior.ppe_net,
+                prior_goodwill=prior.goodwill,
+                prior_ap=prior.ap,
+                prior_accrued=prior.accrued_liabilities,
+                prior_debt=prior.debt,
+                prior_revolver=prior.revolver,
+                prior_equity=prior.equity
+            )
             
-            hist_data.append({
-                'Period': period,
-                'Cash': cash,
-                'AR': ar,
-                'Inventory': inventory,
-                'Current_Assets': current_assets,
-                'PPE': ppe,
-                'Goodwill': goodwill,
-                'Total_Assets': total_assets,
-                'AP': ap,
-                'Accrued_Liabilities': accrued,
-                'Current_Liabilities': current_liabilities,
-                'Total_Debt': total_debt,
-                'Total_Liabilities': total_liabilities,
-                'Equity': equity,
-                'Total_Liab_Equity': total_liabilities + equity,
-                'Balance_Check': balance_check
+            all_years.append(year)
+        
+        # ================================================================
+        # Convert to DataFrames
+        # ================================================================
+        is_data = []
+        bs_data = []
+        cf_data = []
+        
+        for year in all_years:
+            is_data.append({
+                'Period': year.period,
+                'Revenue': year.revenue,
+                'COGS': year.cogs,
+                'Gross_Profit': year.gross_profit,
+                'Gross_Margin_%': (year.gross_profit / year.revenue * 100) if year.revenue > 0 else 0,
+                'SGA': year.sga,
+                'RD': year.rnd,
+                'DA': year.da,
+                'SBC': year.sbc,
+                'EBITDA': year.ebitda,
+                'EBITDA_Margin_%': (year.ebitda / year.revenue * 100) if year.revenue > 0 else 0,
+                'EBIT': year.ebit,
+                'EBIT_Margin_%': (year.ebit / year.revenue * 100) if year.revenue > 0 else 0,
+                'Interest_Expense': year.interest_expense,
+                'Interest_Income': year.interest_income,
+                'Net_Interest': year.interest_income - year.interest_expense,
+                'EBT': year.ebt,
+                'Taxes': year.taxes,
+                'Tax_Rate_%': (year.taxes / year.ebt * 100) if year.ebt > 0 else 0,
+                'Net_Income': year.net_income,
+                'Net_Margin_%': (year.net_income / year.revenue * 100) if year.revenue > 0 else 0
+            })
+            
+            bs_data.append({
+                'Period': year.period,
+                'Cash': year.cash,
+                'AR': year.ar,
+                'Inventory': year.inventory,
+                'Current_Assets': year.cash + year.ar + year.inventory,
+                'PPE_Net': year.ppe_net,
+                'Goodwill': year.goodwill,
+                'Total_Assets': year.total_assets,
+                'AP': year.ap,
+                'Accrued_Liabilities': year.accrued_liabilities,
+                'Current_Liabilities': year.ap + year.accrued_liabilities,
+                'Debt': year.debt,
+                'Revolver': year.revolver,
+                'Total_Debt': year.debt + year.revolver,
+                'Total_Liabilities': year.total_liabilities,
+                'Equity': year.equity,
+                'Total_Liab_Equity': year.total_liab_equity,
+                'Balance_Check': year.balance_check,
+                'Balance_Error': year.balance_error
+            })
+            
+            cf_data.append({
+                'Period': year.period,
+                'Net_Income': year.net_income,
+                'DA': year.da,
+                'SBC': year.sbc,
+                'CFO': year.cfo,
+                'CapEx': -year.capex, # --- FIX: Show negative on CF statement ---
+                'CFI': year.cfi,
+                'FCF': year.cfo + year.cfi,
+                'Debt_Payment': -year.debt_payment,
+                'Revolver_Draw': year.revolver_draw,
+                'Dividends': -year.dividends,
+                'CFF': year.cff,
+                'Net_Cash_Flow': year.net_cash_flow
             })
         
-        return pd.DataFrame(hist_data)
-    
-    def _build_forecast_balance_sheet(self, drivers: DriverInputs, income_statement: pd.DataFrame,
-                                     last_bs: pd.Series, forecast_years: int) -> pd.DataFrame:
-        """Build forecast balance sheet"""
-        projections = []
+        income_statement = pd.DataFrame(is_data)
+        balance_sheet = pd.DataFrame(bs_data)
+        cash_flow = pd.DataFrame(cf_data)
         
-        for year in range(forecast_years):
-            revenue = income_statement.iloc[year]['Revenue']
-            cogs = income_statement.iloc[year]['COGS']
-            
-            # Working capital
-            ar = revenue * (drivers.ar_days[year] / 365)
-            inventory = cogs * (drivers.inventory_days[year] / 365)
-            ap = cogs * (drivers.ap_days[year] / 365)
-            
-            # Cash (simple plug for now)
-            cash = revenue * 0.05
-            current_assets = cash + ar + inventory
-            
-            # Fixed assets
-            capex = revenue * drivers.capex_pct_revenue[year]
-            da = income_statement.iloc[year]['DA']
-            
-            if year == 0:
-                ppe = last_bs['PPE'] + capex - da
-                goodwill = last_bs['Goodwill']
-                total_debt = last_bs['Total_Debt']
-            else:
-                ppe = projections[-1]['PPE'] + capex - da
-                goodwill = projections[-1]['Goodwill']
-                total_debt = projections[-1]['Total_Debt'] - drivers.mandatory_debt_payment
-                total_debt = max(0, total_debt)
-            
-            total_assets = current_assets + ppe + goodwill
-            
-            # Liabilities
-            accrued = revenue * 0.03
-            current_liabilities = ap + accrued
-            total_liabilities = current_liabilities + total_debt
-            
-            # Equity (plug)
-            equity = total_assets - total_liabilities
-            
-            balance_check = abs(total_assets - (total_liabilities + equity)) < 0.01
-            
-            projections.append({
-                'Period': income_statement.iloc[year]['Period'],
-                'Cash': cash,
-                'AR': ar,
-                'Inventory': inventory,
-                'Current_Assets': current_assets,
-                'PPE': ppe,
-                'Goodwill': goodwill,
-                'Total_Assets': total_assets,
-                'AP': ap,
-                'Accrued_Liabilities': accrued,
-                'Current_Liabilities': current_liabilities,
-                'Total_Debt': total_debt,
-                'Total_Liabilities': total_liabilities,
-                'Equity': equity,
-                'Total_Liab_Equity': total_liabilities + equity,
-                'Balance_Check': balance_check
-            })
-        
-        return pd.DataFrame(projections)
-    
-    def _build_cash_flow_statement(self, income_statement: pd.DataFrame, 
-                                   balance_sheet: pd.DataFrame, 
-                                   start_idx: int = 0) -> pd.DataFrame:
-        """Build cash flow statement for given periods"""
-        projections = []
-        
-        for year in range(len(income_statement)):
-            period = income_statement.iloc[year]['Period']
-            net_income = income_statement.iloc[year]['Net_Income']
-            da = income_statement.iloc[year]['DA']
-            sbc = income_statement.iloc[year]['SBC']
-            
-            # Changes in working capital
-            if year + start_idx == 0:
-                # First period - no prior period for comparison
-                delta_ar = 0
-                delta_inventory = 0
-                delta_ap = 0
-            else:
-                delta_ar = balance_sheet.iloc[year]['AR'] - balance_sheet.iloc[year-1]['AR']
-                delta_inventory = balance_sheet.iloc[year]['Inventory'] - balance_sheet.iloc[year-1]['Inventory']
-                delta_ap = balance_sheet.iloc[year]['AP'] - balance_sheet.iloc[year-1]['AP']
-            
-            delta_nwc = delta_ar + delta_inventory - delta_ap
-            
-            # Cash from operations
-            cfo = net_income + da + sbc - delta_nwc
-            
-            # CapEx
-            if year + start_idx == 0:
-                capex = 0  # Not calculated for first period
-            else:
-                capex = -(balance_sheet.iloc[year]['PPE'] - balance_sheet.iloc[year-1]['PPE'] + da)
-            
-            # Free Cash Flow
-            fcf = cfo + capex
-            
-            # Financing activities
-            if year + start_idx == 0:
-                debt_change = 0
-            else:
-                debt_change = balance_sheet.iloc[year]['Total_Debt'] - balance_sheet.iloc[year-1]['Total_Debt']
-            
-            projections.append({
-                'Period': period,
-                'Net_Income': net_income,
-                'DA': da,
-                'SBC': sbc,
-                'Changes_in_WC': -delta_nwc,
-                'CFO': cfo,
-                'CapEx': capex,
-                'CFI': capex,  # Investing cash flow
-                'FCF': fcf,
-                'Debt_Change': debt_change,
-                'CFF': debt_change,  # Financing cash flow
-                'Net_Change_Cash': cfo + capex + debt_change
-            })
-        
-        return pd.DataFrame(projections)
-    
-    def build_integrated_model(self, historical: HistoricalData, drivers: DriverInputs, 
-                              forecast_years: int = 5) -> ThreeStatementResult:
-        """
-        Build complete integrated 3-statement model with historical + forecast
-        
-        Args:
-            historical: Historical financial data (e.g., FY-2, FY-1, FY0)
-            drivers: Forecast assumptions and drivers
-            forecast_years: Number of years to forecast (default 5)
-        
-        Returns:
-            ThreeStatementResult with complete historical + forecast
-        """
-        logger.info(f"Building integrated 3-statement model: {len(historical.periods)} historical + {forecast_years} forecast periods")
-        
-        # 1. Build historical statements
-        hist_is = self._build_historical_income_statement(historical)
-        hist_bs = self._build_historical_balance_sheet(historical)
-        
-        # 2. Build forecast statements
-        base_revenue = historical.revenue[-1]  # Last historical revenue
-        base_debt = historical.debt[-1]  # Last historical debt
-        
-        forecast_is = self._build_forecast_income_statement(
-            drivers, base_revenue, base_debt, forecast_years, start_year=1
-        )
-        
-        last_bs_row = hist_bs.iloc[-1]
-        forecast_bs = self._build_forecast_balance_sheet(
-            drivers, forecast_is, last_bs_row, forecast_years
-        )
-        
-        # 3. Combine historical + forecast
-        income_statement = pd.concat([hist_is, forecast_is], ignore_index=True)
-        balance_sheet = pd.concat([hist_bs, forecast_bs], ignore_index=True)
-        
-        # 4. Build cash flow statement for all periods
-        cash_flow = self._build_cash_flow_statement(income_statement, balance_sheet)
-        
-        # 5. Build supporting schedules
-        wc_schedule = pd.DataFrame({
-            'Period': balance_sheet['Period'],
-            'AR': balance_sheet['AR'],
-            'Inventory': balance_sheet['Inventory'],
-            'AP': balance_sheet['AP'],
-            'Net_Working_Capital': balance_sheet['AR'] + balance_sheet['Inventory'] - balance_sheet['AP'],
-            'AR_Days': (balance_sheet['AR'] / income_statement['Revenue'] * 365).round(0),
-            'Inventory_Days': (balance_sheet['Inventory'] / income_statement['COGS'] * 365).round(0),
-            'AP_Days': (balance_sheet['AP'] / income_statement['COGS'] * 365).round(0)
-        })
-        
-        debt_schedule = pd.DataFrame({
-            'Period': balance_sheet['Period'],
-            'Beginning_Debt': [historical.debt[0]] + balance_sheet['Total_Debt'].tolist()[:-1],
-            'Ending_Debt': balance_sheet['Total_Debt'],
-            'Debt_Change': balance_sheet['Total_Debt'].diff().fillna(0),
-            'Interest_Rate_%': (income_statement['Interest_Expense'] / balance_sheet['Total_Debt'] * 100).fillna(0).round(2)
-        })
-        
-        # 6. Extract forecast metrics
+        # Extract forecast metrics
         forecast_start_idx = len(historical.periods)
         fcf_forecast = cash_flow['FCF'].iloc[forecast_start_idx:].tolist()
         ebitda_forecast = income_statement['EBITDA'].iloc[forecast_start_idx:].tolist()
         net_income_forecast = income_statement['Net_Income'].iloc[forecast_start_idx:].tolist()
         
-        # 7. Validation
-        balance_check = all(balance_sheet['Balance_Check'])
-        cash_flow_check = True  # Could add more validation here
+        # Validation
+        all_balance_checks = all(year.balance_check for year in all_years)
+        max_error = max(abs(year.balance_error) for year in all_years)
         
-        result = ThreeStatementResult(
+        logger.info(f"✓ Model complete: {len(all_years)} periods")
+        logger.info(f"✓ All balance sheets validate: {all_balance_checks}")
+        logger.info(f"✓ Max balance error: ${max_error:,.2f}")
+        
+        return ThreeStatementResult(
+            years=all_years,
+            historical_periods=historical.periods,
+            forecast_periods=[f"FY+{i+1}" for i in range(forecast_years)],
             income_statement=income_statement,
             balance_sheet=balance_sheet,
             cash_flow_statement=cash_flow,
-            working_capital_schedule=wc_schedule,
-            debt_schedule=debt_schedule,
-            historical_periods=historical.periods,
-            forecast_periods=[f'FY+{i+1}' for i in range(forecast_years)],
             fcf_forecast=fcf_forecast,
             ebitda_forecast=ebitda_forecast,
             net_income_forecast=net_income_forecast,
-            balance_check=balance_check,
-            cash_flow_check=cash_flow_check,
-            base_year=historical.periods[-1]
-        )
-        
-        logger.info(f"✓ 3-statement model complete: {len(income_statement)} total periods")
-        logger.info(f"✓ Balance sheet validates: {balance_check}")
-        
-        return result
-    
-    def build_three_statement_model(self, drivers: DriverInputs, base_revenue: float, 
-                                   base_debt: float, years: int = 5) -> ThreeStatementResult:
-        """
-        Legacy method: Build forecast-only 3-statement model
-        
-        Use build_integrated_model() for historical + forecast support
-        """
-        logger.info(f"Building forecast-only 3-statement model for {years} years")
-        
-        # Build forecast statements
-        forecast_is = self._build_forecast_income_statement(drivers, base_revenue, base_debt, years, start_year=1)
-        
-        # Create dummy last balance sheet for initial state
-        last_bs = pd.Series({
-            'PPE': base_revenue * 0.30,
-            'Goodwill': base_revenue * 0.10,
-            'Total_Debt': base_debt
-        })
-        
-        forecast_bs = self._build_forecast_balance_sheet(drivers, forecast_is, last_bs, years)
-        cash_flow = self._build_cash_flow_statement(forecast_is, forecast_bs, start_idx=1)
-        
-        # Supporting schedules
-        wc_schedule = pd.DataFrame({
-            'Period': forecast_bs['Period'],
-            'AR': forecast_bs['AR'],
-            'Inventory': forecast_bs['Inventory'],
-            'AP': forecast_bs['AP'],
-            'Net_Working_Capital': forecast_bs['AR'] + forecast_bs['Inventory'] - forecast_bs['AP']
-        })
-        
-        debt_schedule = pd.DataFrame({
-            'Period': forecast_bs['Period'],
-            'Beginning_Debt': [base_debt] + forecast_bs['Total_Debt'].tolist()[:-1],
-            'Ending_Debt': forecast_bs['Total_Debt']
-        })
-        
-        return ThreeStatementResult(
-            income_statement=forecast_is,
-            balance_sheet=forecast_bs,
-            cash_flow_statement=cash_flow,
-            working_capital_schedule=wc_schedule,
-            debt_schedule=debt_schedule,
-            historical_periods=[],
-            forecast_periods=[f'FY+{i+1}' for i in range(years)],
-            fcf_forecast=cash_flow['FCF'].tolist(),
-            ebitda_forecast=forecast_is['EBITDA'].tolist(),
-            net_income_forecast=forecast_is['Net_Income'].tolist(),
-            balance_check=all(forecast_bs['Balance_Check']),
-            cash_flow_check=True,
-            base_year='FY0'
+            all_balance_checks_pass=all_balance_checks,
+            max_balance_error=max_error
         )
